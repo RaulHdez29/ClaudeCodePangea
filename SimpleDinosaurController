@@ -339,13 +339,20 @@ public class SimpleDinosaurController : MonoBehaviour
         
         // Aplicar movimiento
         ApplyMovement();
-        
+
         // ⭐ Alinear con el terreno (solo afecta pitch/roll, no yaw)
-        if (alignToTerrain && controller.isGrounded)
+        // 🌊 NO alinear cuando está nadando
+        if (alignToTerrain && controller.isGrounded && !isSwimming)
         {
             AlignToTerrainFixed();
         }
-        
+
+        // 🌊 Resetear rotación a horizontal cuando está nadando
+        if (isSwimming)
+        {
+            ResetRotationToHorizontal();
+        }
+
         // Actualizar animaciones
         UpdateAnimations();
         
@@ -548,12 +555,14 @@ void ApplyMovement()
     // 🌊 SISTEMA DE NATACIÓN
     if (isInWater)
     {
-        // Calcular profundidad en el agua
-        float distanceToSurface = waterSurfaceY - (transform.position.y + waterSurfaceOffset);
-        bool isUnderWater = distanceToSurface > 0f;
+        // ✅ Calcular profundidad real del agua (desde el centro del personaje)
+        float waterDepth = waterSurfaceY - transform.position.y;
+        bool isDeepEnoughToSwim = waterDepth >= waterSurfaceOffset;
 
-        if (isUnderWater)
+        if (isDeepEnoughToSwim)
         {
+            // 🏊 AGUA PROFUNDA - ACTIVAR NATACIÓN
+
             // ✅ FLOTACIÓN - aplicar fuerza hacia arriba
             velocity.y += buoyancyForce * Time.deltaTime;
 
@@ -565,20 +574,35 @@ void ApplyMovement()
 
             // Determinar si está nadando (moviéndose)
             isSwimming = inputVector.magnitude > 0.1f;
+
+            // No resetear hasJumped en agua (a menos que se permita saltar desde agua)
+            if (canJumpFromWater)
+            {
+                canJump = true;
+                hasJumped = false;
+            }
         }
         else
         {
-            // Está en la superficie pero no bajo el agua
-            // Aplicar gravedad suave
-            velocity.y += gravity * 0.3f * Time.deltaTime;
-            isSwimming = false;
-        }
+            // 🚶 AGUA POCO PROFUNDA - CAMINAR NORMALMENTE
 
-        // No resetear hasJumped en agua (a menos que se permita saltar desde agua)
-        if (canJumpFromWater)
-        {
-            canJump = true;
-            hasJumped = false;
+            isSwimming = false;
+
+            // Aplicar física normal como en tierra
+            if (controller.isGrounded && velocity.y < 0f)
+            {
+                velocity.y = -2f;
+            }
+
+            // Aplicar gravedad normal
+            velocity.y += gravity * Time.deltaTime;
+            velocity.y = Mathf.Max(velocity.y, terminalVelocity);
+
+            // Aplicar fuerza adicional si está en pendiente
+            if (isOnSlope && controller.isGrounded)
+            {
+                velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+            }
         }
     }
     else
@@ -611,7 +635,7 @@ void ApplyMovement()
     controller.Move(finalMove * Time.deltaTime);
 
     // ✅ ACTUALIZAR ESTADO DE SUELO DESPUÉS DEL MOVIMIENTO
-    if (controller.isGrounded && !isInWater)
+    if (controller.isGrounded && !isSwimming)
     {
         lastGroundedTime = Time.time;
 
@@ -671,7 +695,24 @@ void ApplyMovement()
                 Time.deltaTime * terrainAlignmentSpeed);
         }
     }
-    
+
+    // 🌊 Resetear rotación a horizontal al nadar
+    void ResetRotationToHorizontal()
+    {
+        // Crear rotación horizontal (pitch=0, roll=0, mantener yaw)
+        Vector3 targetEuler = transform.eulerAngles;
+        targetEuler.x = 0f;  // Sin pitch (inclinación adelante/atrás)
+        targetEuler.z = 0f;  // Sin roll (inclinación lateral)
+
+        // Suavizar la transición a horizontal
+        Quaternion targetRotation = Quaternion.Euler(targetEuler);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation,
+            Time.deltaTime * terrainAlignmentSpeed);
+
+        // También resetear smoothNormal para que cuando salga del agua no tenga valores residuales
+        smoothNormal = Vector3.Lerp(smoothNormal, Vector3.up, Time.deltaTime * terrainAlignmentSpeed);
+    }
+
 void UpdateAnimations()
 {
     if (animator == null) return;
