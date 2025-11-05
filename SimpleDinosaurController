@@ -163,7 +163,22 @@ public class SimpleDinosaurController : MonoBehaviour
     public AudioClip[] callSounds;
     public AudioClip[] jumpSounds;
     public AudioClip[] landSounds;
-    
+
+    [Header("🌊 SISTEMA DE NATACIÓN")]
+    [Tooltip("Layer del agua (debe tener Trigger activado)")]
+    public LayerMask waterLayer;
+    [Tooltip("Velocidad de natación")]
+    public float swimSpeed = 3f;
+    [Tooltip("Fuerza de flotación (empuje hacia arriba)")]
+    public float buoyancyForce = 9.8f;
+    [Tooltip("Resistencia del agua (frena movimiento)")]
+    [Range(0.5f, 0.95f)]
+    public float waterDrag = 0.8f;
+    [Tooltip("Altura del agua donde empieza a flotar")]
+    public float waterSurfaceOffset = 1f;
+    [Tooltip("Permitir salto desde el agua")]
+    public bool canJumpFromWater = false;
+
     // Estados
     public enum MovementState
     {
@@ -172,7 +187,9 @@ public class SimpleDinosaurController : MonoBehaviour
         Run = 2,
         Jump = 3,
         Falling = 4,
-        Attacking = 5
+        Attacking = 5,
+        Swimming = 6,
+        IdleSwim = 7
     }
     
     public enum TurnState
@@ -190,7 +207,9 @@ public class SimpleDinosaurController : MonoBehaviour
     public float currentSlopeAngle = 0f;
     public bool isAttacking = false;
     public int enemiesInRange = 0;
-    
+    public bool isInWater = false;
+    public bool isSwimming = false;
+
     // Character Controller
     private CharacterController controller;
     
@@ -237,8 +256,13 @@ public class SimpleDinosaurController : MonoBehaviour
     private float targetLook = 0f;
     private float lastCameraAngle = 0f;
     private float lastCameraVerticalAngle = 0f;
-	
-    
+
+    // 🌊 Variables de natación
+    private Collider waterCollider = null;
+    private float waterSurfaceY = 0f;
+    private bool wasInWater = false;
+
+
     void Start()
     {
         controller = GetComponent<CharacterController>();
@@ -418,18 +442,28 @@ public class SimpleDinosaurController : MonoBehaviour
                     Time.deltaTime * turnSmoothness);
             }
             
-            // Calcular velocidad objetivo
-            targetSpeed = isRunning ? runSpeed : walkSpeed;
-            
-            // Reducir velocidad durante el giro
-            float angleToTarget = Vector3.Angle(transform.forward, currentMoveDirection);
-            if (angleToTarget > lookAtTolerance)
+            // 🌊 Calcular velocidad objetivo (diferente en agua)
+            if (isInWater && isSwimming)
             {
-                targetSpeed *= turningSpeedFactor;
+                targetSpeed = swimSpeed;  // Velocidad de natación
             }
-            
-            // Aplicar modificador de pendiente
-            if (isOnSlope)
+            else
+            {
+                targetSpeed = isRunning ? runSpeed : walkSpeed;
+            }
+
+            // Reducir velocidad durante el giro (no aplica en agua)
+            if (!isInWater)
+            {
+                float angleToTarget = Vector3.Angle(transform.forward, currentMoveDirection);
+                if (angleToTarget > lookAtTolerance)
+                {
+                    targetSpeed *= turningSpeedFactor;
+                }
+            }
+
+            // Aplicar modificador de pendiente (no aplica en agua)
+            if (isOnSlope && !isInWater)
             {
                 float slopeFactor = Vector3.Dot(currentMoveDirection, slopeNormal);
                 if (slopeFactor < 0) // Subiendo
@@ -511,20 +545,63 @@ void ApplyMovement()
     // ✅ ACTUALIZAR TIEMPO EN SUELO PRIMERO
     bool wasGrounded = controller.isGrounded;
 
-    // Mantener pegado al suelo (evita saltos falsos cuando ya está en tierra)
-    if (controller.isGrounded && velocity.y < 0f)
+    // 🌊 SISTEMA DE NATACIÓN
+    if (isInWater)
     {
-        velocity.y = -2f;
+        // Calcular profundidad en el agua
+        float distanceToSurface = waterSurfaceY - (transform.position.y + waterSurfaceOffset);
+        bool isUnderWater = distanceToSurface > 0f;
+
+        if (isUnderWater)
+        {
+            // ✅ FLOTACIÓN - aplicar fuerza hacia arriba
+            velocity.y += buoyancyForce * Time.deltaTime;
+
+            // Limitar velocidad vertical en agua
+            velocity.y = Mathf.Clamp(velocity.y, -2f, 2f);
+
+            // Aplicar resistencia del agua (drag)
+            velocity *= waterDrag;
+
+            // Determinar si está nadando (moviéndose)
+            isSwimming = inputVector.magnitude > 0.1f;
+        }
+        else
+        {
+            // Está en la superficie pero no bajo el agua
+            // Aplicar gravedad suave
+            velocity.y += gravity * 0.3f * Time.deltaTime;
+            isSwimming = false;
+        }
+
+        // No resetear hasJumped en agua (a menos que se permita saltar desde agua)
+        if (canJumpFromWater)
+        {
+            canJump = true;
+            hasJumped = false;
+        }
     }
-
-    // Aplicar gravedad
-    velocity.y += gravity * Time.deltaTime;
-    velocity.y = Mathf.Max(velocity.y, terminalVelocity);
-
-    // Aplicar fuerza adicional si está en pendiente
-    if (isOnSlope && controller.isGrounded)
+    else
     {
-        velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+        // 🏃 MOVIMIENTO NORMAL (FUERA DEL AGUA)
+
+        // Mantener pegado al suelo (evita saltos falsos cuando ya está en tierra)
+        if (controller.isGrounded && velocity.y < 0f)
+        {
+            velocity.y = -2f;
+        }
+
+        // Aplicar gravedad
+        velocity.y += gravity * Time.deltaTime;
+        velocity.y = Mathf.Max(velocity.y, terminalVelocity);
+
+        // Aplicar fuerza adicional si está en pendiente
+        if (isOnSlope && controller.isGrounded)
+        {
+            velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+        }
+
+        isSwimming = false;
     }
 
     // Combinar movimiento horizontal y vertical
@@ -534,7 +611,7 @@ void ApplyMovement()
     controller.Move(finalMove * Time.deltaTime);
 
     // ✅ ACTUALIZAR ESTADO DE SUELO DESPUÉS DEL MOVIMIENTO
-    if (controller.isGrounded)
+    if (controller.isGrounded && !isInWater)
     {
         lastGroundedTime = Time.time;
 
@@ -599,13 +676,17 @@ void UpdateAnimations()
 {
     if (animator == null) return;
 
-    // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo)
-    float normalizedSpeed = currentSpeed / runSpeed;
+    // 🌊 PARÁMETROS DE NATACIÓN
+    animator.SetBool("IsInWater", isInWater);
+    animator.SetBool("IsSwimming", isSwimming);
+
+    // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
+    float normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
     animator.SetFloat("Speed", normalizedSpeed);
 
     // 🔹 2. Estados principales
-    animator.SetBool("IsGrounded", controller.isGrounded);
-    animator.SetBool("IsRunning", isRunning);
+    animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
+    animator.SetBool("IsRunning", isRunning && !isInWater);
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
 
@@ -952,7 +1033,19 @@ void UpdateTimers()
     
     void UpdateState()
     {
-        if (isAttacking)
+        // 🌊 Estados de natación tienen prioridad
+        if (isInWater)
+        {
+            if (isSwimming && currentSpeed > movementThreshold)
+            {
+                currentState = MovementState.Swimming;
+            }
+            else
+            {
+                currentState = MovementState.IdleSwim;
+            }
+        }
+        else if (isAttacking)
         {
             currentState = MovementState.Attacking;
         }
@@ -1146,6 +1239,81 @@ void UpdateTimers()
                                transform.position + Vector3.up * 0.7f + targetMoveDirection * 2f);
             }
         }
+
+        // 🌊 Gizmos de agua
+        if (Application.isPlaying && isInWater && waterCollider != null)
+        {
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireSphere(transform.position, 1f);
+
+            // Línea de superficie del agua
+            Gizmos.color = Color.blue;
+            Vector3 surfacePos = new Vector3(transform.position.x, waterSurfaceY, transform.position.z);
+            Gizmos.DrawLine(surfacePos + Vector3.left * 2f, surfacePos + Vector3.right * 2f);
+            Gizmos.DrawLine(surfacePos + Vector3.forward * 2f, surfacePos + Vector3.back * 2f);
+        }
+    }
+
+    // 🌊 SISTEMA DE DETECCIÓN DE AGUA
+    void OnTriggerEnter(Collider other)
+    {
+        // Verificar si el collider está en el layer de agua
+        if (((1 << other.gameObject.layer) & waterLayer) != 0)
+        {
+            EnterWater(other);
+        }
+    }
+
+    void OnTriggerStay(Collider other)
+    {
+        // Verificar si el collider está en el layer de agua
+        if (((1 << other.gameObject.layer) & waterLayer) != 0)
+        {
+            if (!isInWater)
+            {
+                EnterWater(other);
+            }
+
+            // Actualizar altura de superficie del agua
+            UpdateWaterSurface(other);
+        }
+    }
+
+    void OnTriggerExit(Collider other)
+    {
+        // Verificar si el collider está en el layer de agua
+        if (((1 << other.gameObject.layer) & waterLayer) != 0)
+        {
+            ExitWater();
+        }
+    }
+
+    void EnterWater(Collider water)
+    {
+        isInWater = true;
+        waterCollider = water;
+        wasInWater = true;
+
+        // Calcular superficie del agua
+        UpdateWaterSurface(water);
+
+        Debug.Log("🌊 Dinosaurio entró al agua!");
+    }
+
+    void UpdateWaterSurface(Collider water)
+    {
+        // Calcular la superficie del agua (parte superior del collider)
+        Bounds bounds = water.bounds;
+        waterSurfaceY = bounds.max.y;
+    }
+
+    void ExitWater()
+    {
+        isInWater = false;
+        isSwimming = false;
+        waterCollider = null;
+
+        Debug.Log("🏖️ Dinosaurio salió del agua!");
     }
 }
 
