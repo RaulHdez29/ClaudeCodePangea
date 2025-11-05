@@ -1301,7 +1301,12 @@ void UpdateTimers()
         // Verificar si el collider está en el layer de agua
         if (((1 << other.gameObject.layer) & waterLayer) != 0)
         {
-            EnterWater(other);
+            // Guardar referencia al collider del agua
+            waterCollider = other;
+            UpdateWaterSurface(other);
+
+            // ✅ NO activar isInWater inmediatamente, esperar a verificar profundidad
+            Debug.Log("🌊 Dinosaurio tocó el agua (verificando profundidad...)");
         }
     }
 
@@ -1310,13 +1315,28 @@ void UpdateTimers()
         // Verificar si el collider está en el layer de agua
         if (((1 << other.gameObject.layer) & waterLayer) != 0)
         {
-            if (!isInWater)
-            {
-                EnterWater(other);
-            }
-
             // Actualizar altura de superficie del agua
             UpdateWaterSurface(other);
+
+            // ✅ Calcular profundidad del agua
+            float waterDepth = waterSurfaceY - transform.position.y;
+            bool isDeepEnough = waterDepth >= waterSurfaceOffset;
+
+            // ✅ Solo activar isInWater si está lo suficientemente profundo
+            if (isDeepEnough && !isInWater)
+            {
+                // Entró a agua profunda
+                isInWater = true;
+                wasInWater = true;
+                Debug.Log($"🏊 Agua profunda detectada! (profundidad: {waterDepth:F2}m)");
+            }
+            else if (!isDeepEnough && isInWater)
+            {
+                // Salió a agua poco profunda
+                isInWater = false;
+                isSwimming = false;
+                Debug.Log($"🚶 Agua poco profunda (profundidad: {waterDepth:F2}m)");
+            }
         }
     }
 
@@ -1327,18 +1347,6 @@ void UpdateTimers()
         {
             ExitWater();
         }
-    }
-
-    void EnterWater(Collider water)
-    {
-        isInWater = true;
-        waterCollider = water;
-        wasInWater = true;
-
-        // Calcular superficie del agua
-        UpdateWaterSurface(water);
-
-        Debug.Log("🌊 Dinosaurio entró al agua!");
     }
 
     void UpdateWaterSurface(Collider water)
