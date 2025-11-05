@@ -58,7 +58,7 @@ public class SimpleDinosaurController : MonoBehaviour
 	[Tooltip("Tiempo (s) para guardar input de salto antes de aterrizar (jump buffer)")]
 	public float jumpBufferTime = 0.12f;
 
-	private float lastGroundedTimeStamp = -10f;
+	private float lastGroundedTime = -10f;  // ✅ Variable unificada
 	private float jumpBufferTimerLocal = 0f;
     
     [Header("⭐ CONFIGURACIÓN DE GRAVEDAD")]
@@ -215,7 +215,6 @@ public class SimpleDinosaurController : MonoBehaviour
     private bool canJump = true;
     private float jumpCooldownTimer = 0f;
     private bool hasJumped = false;
-    private float lastGroundedTime = 0f;
     
     // Variables de ataque
     private float attackCooldownTimer = 0f;
@@ -509,6 +508,9 @@ void ApplySeparatedRotation()
     
 void ApplyMovement()
 {
+    // ✅ ACTUALIZAR TIEMPO EN SUELO PRIMERO
+    bool wasGrounded = controller.isGrounded;
+
     // Mantener pegado al suelo (evita saltos falsos cuando ya está en tierra)
     if (controller.isGrounded && velocity.y < 0f)
     {
@@ -518,24 +520,6 @@ void ApplyMovement()
     // Aplicar gravedad
     velocity.y += gravity * Time.deltaTime;
     velocity.y = Mathf.Max(velocity.y, terminalVelocity);
-
-    // Comprobar si toca suelo
-    if (controller.isGrounded)
-    {
-        lastGroundedTimeStamp = Time.time;
-
-        // 🔹 Restablecer salto al aterrizar
-        if (!canJump)
-        {
-            canJump = true;
-        }
-
-        // 🔹 Resetear estado si venía de un salto
-        if (hasJumped)
-        {
-            hasJumped = false;
-        }
-    }
 
     // Aplicar fuerza adicional si está en pendiente
     if (isOnSlope && controller.isGrounded)
@@ -549,17 +533,27 @@ void ApplyMovement()
     // Aplicar movimiento
     controller.Move(finalMove * Time.deltaTime);
 
-    // Guardar tiempo del último grounded
+    // ✅ ACTUALIZAR ESTADO DE SUELO DESPUÉS DEL MOVIMIENTO
     if (controller.isGrounded)
     {
         lastGroundedTime = Time.time;
+
+        // 🔹 Restablecer salto al aterrizar (con frame de gracia)
+        if (hasJumped && !canJump)
+        {
+            canJump = true;
+            hasJumped = false;
+            jumpCooldownTimer = 0f;  // ✅ Resetear cooldown también
+        }
     }
 
     // 🔹 Jump buffer (si presionó salto antes de tocar suelo)
     if (jumpBufferTimerLocal > 0f)
     {
         jumpBufferTimerLocal -= Time.deltaTime;
-        if ((controller.isGrounded || Time.time - lastGroundedTimeStamp <= coyoteTime) && canJump && !isAttacking)
+
+        // ✅ Intentar ejecutar salto buffereado
+        if ((controller.isGrounded || Time.time - lastGroundedTime <= coyoteTime) && canJump && !isAttacking)
         {
             DoJump();
             jumpBufferTimerLocal = 0f;
@@ -805,8 +799,9 @@ void UpdateAnimations()
     public void TryAttack()
     {
 		if (isCalling) return;
-        bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir) 
-                           && attackCooldownTimer <= 0f 
+        // ✅ Usar variable unificada lastGroundedTime
+        bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir)
+                           && attackCooldownTimer <= 0f
                            && !isAttacking;
         
         if (canAttackNow)
@@ -904,11 +899,20 @@ void UpdateAnimations()
 		// Guardar input de salto (jump buffer)
 		jumpBufferTimerLocal = jumpBufferTime;
 
-		// Si ya estamos atacando o no podemos saltar, simplemente retornamos (el buffer guardará el intento)
-		if (isAttacking || !canJump) return;
+		// ✅ Verificar si estamos atacando
+		if (isAttacking) return;
+
+		// ✅ Si no podemos saltar pero estamos en el suelo, permitir saltar (fix para bug de salto único)
+		if (!canJump && controller.isGrounded && jumpCooldownTimer <= 0f)
+		{
+			canJump = true;
+		}
+
+		// ✅ Verificar si podemos saltar
+		if (!canJump) return;
 
 		// Si estamos en ground o dentro del coyote time, ejecutar salto ahora
-		if (controller.isGrounded || Time.time - lastGroundedTimeStamp <= coyoteTime)
+		if (controller.isGrounded || Time.time - lastGroundedTime <= coyoteTime)
 		{
 			DoJump();
 		}
