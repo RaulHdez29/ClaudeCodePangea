@@ -193,6 +193,9 @@ public class SimpleDinosaurController : MonoBehaviour
     public float waterDrag = 0.8f;
     [Tooltip("Altura del agua donde empieza a flotar")]
     public float waterSurfaceOffset = 1f;
+    [Tooltip("Tolerancia para evitar parpadeo entre estados (0.5 = 50% del offset)")]
+    [Range(0.3f, 0.8f)]
+    public float waterHysteresis = 0.6f;
     [Tooltip("Permitir salto desde el agua")]
     public bool canJumpFromWater = false;
 
@@ -402,6 +405,7 @@ public class SimpleDinosaurController : MonoBehaviour
         waterSurfaceOffset = modelHeight * 0.5f;
         buoyancyForce = 15f;
         waterDrag = 0.75f;
+        waterHysteresis = 0.6f;
 
         // Ataque
         attackRange = modelHeight * 0.6f;
@@ -433,6 +437,7 @@ public class SimpleDinosaurController : MonoBehaviour
         waterSurfaceOffset = modelHeight * 0.45f;
         buoyancyForce = 9.8f;
         waterDrag = 0.80f;
+        waterHysteresis = 0.6f;
 
         // Ataque
         attackRange = modelHeight * 0.5f;
@@ -464,6 +469,7 @@ public class SimpleDinosaurController : MonoBehaviour
         waterSurfaceOffset = modelHeight * 0.4f;
         buoyancyForce = 8f;
         waterDrag = 0.85f;
+        waterHysteresis = 0.6f;
 
         // Ataque
         attackRange = modelHeight * 0.5f;
@@ -1472,22 +1478,27 @@ void UpdateTimers()
 
             // ✅ Calcular profundidad del agua
             float waterDepth = waterSurfaceY - transform.position.y;
-            bool isDeepEnough = waterDepth >= waterSurfaceOffset;
+
+            // 🔄 HISTÉRESIS: Usar diferentes umbrales para entrar/salir
+            // Esto evita el parpadeo cuando el dinosaurio flota
+            float enterThreshold = waterSurfaceOffset;
+            float exitThreshold = waterSurfaceOffset * waterHysteresis;
 
             // ✅ Solo activar isInWater si está lo suficientemente profundo
-            if (isDeepEnough && !isInWater)
+            if (!isInWater && waterDepth >= enterThreshold)
             {
                 // Entró a agua profunda
                 isInWater = true;
                 wasInWater = true;
-                Debug.Log($"🏊 Agua profunda detectada! (profundidad: {waterDepth:F2}m)");
+                Debug.Log($"🏊 Agua profunda detectada! (profundidad: {waterDepth:F2}m, umbral: {enterThreshold:F2}m)");
             }
-            else if (!isDeepEnough && isInWater)
+            // ✅ Solo desactivar si la profundidad baja significativamente (histéresis)
+            else if (isInWater && waterDepth < exitThreshold)
             {
-                // Salió a agua poco profunda
+                // Salió a agua poco profunda (con tolerancia)
                 isInWater = false;
                 isSwimming = false;
-                Debug.Log($"🚶 Agua poco profunda (profundidad: {waterDepth:F2}m)");
+                Debug.Log($"🚶 Agua poco profunda (profundidad: {waterDepth:F2}m, umbral salida: {exitThreshold:F2}m)");
             }
         }
     }
