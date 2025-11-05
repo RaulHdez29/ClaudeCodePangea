@@ -538,10 +538,9 @@ void ApplyMovement()
     {
         lastGroundedTime = Time.time;
 
-        // 🔹 Restablecer salto al aterrizar SOLO SI el cooldown ya terminó
-        if (hasJumped && jumpCooldownTimer <= 0f)
+        // 🔹 Resetear hasJumped cuando aterriza
+        if (hasJumped)
         {
-            canJump = true;
             hasJumped = false;
         }
     }
@@ -882,12 +881,10 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
-		// ✅ El botón ya está deshabilitado en la UI cuando no se puede saltar
-		// Solo verificamos condiciones básicas por seguridad
-		if (isAttacking) return;
+		// ✅ Verificaciones simples - el botón ya debería estar deshabilitado
 		if (!controller.isGrounded) return;
-		if (jumpCooldownTimer > 0f) return;
 		if (!canJump) return;
+		if (isAttacking) return;
 
 		// Ejecutar salto
 		DoJump();
@@ -916,18 +913,20 @@ private void DoJump()
     
 void UpdateTimers()
 {
-    // Control del cooldown de salto
-    if (!canJump)
+    // ✅ Control del cooldown de salto - SIMPLIFICADO
+    if (jumpCooldownTimer > 0f)
     {
         jumpCooldownTimer -= Time.deltaTime;
+
+        // Cuando el cooldown termina, permitir saltar de nuevo
         if (jumpCooldownTimer <= 0f)
         {
-            // No habilitamos canJump aquí — se reactiva automáticamente al aterrizar
             jumpCooldownTimer = 0f;
+            canJump = true;  // ✅ Resetear aquí cuando el cooldown termine
         }
     }
 
-    // Control del cooldown del ataque (mantener el tuyo original)
+    // Control del cooldown del ataque
     if (attackCooldownTimer > 0f)
     {
         attackCooldownTimer -= Time.deltaTime;
@@ -977,7 +976,7 @@ void UpdateTimers()
         // ✅ DESHABILITAR BOTÓN DE SALTO cuando no se puede usar
         if (jumpButton != null)
         {
-            bool canJumpNow = controller.isGrounded && canJump && jumpCooldownTimer <= 0f && !isAttacking;
+            bool canJumpNow = controller.isGrounded && canJump && !isAttacking;
             jumpButton.interactable = canJumpNow;
 
             // Cambiar color visual para feedback
