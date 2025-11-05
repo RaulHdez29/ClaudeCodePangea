@@ -538,25 +538,11 @@ void ApplyMovement()
     {
         lastGroundedTime = Time.time;
 
-        // 🔹 Restablecer salto al aterrizar (con frame de gracia)
-        if (hasJumped && !canJump)
+        // 🔹 Restablecer salto al aterrizar SOLO SI el cooldown ya terminó
+        if (hasJumped && jumpCooldownTimer <= 0f)
         {
             canJump = true;
             hasJumped = false;
-            jumpCooldownTimer = 0f;  // ✅ Resetear cooldown también
-        }
-    }
-
-    // 🔹 Jump buffer (si presionó salto antes de tocar suelo)
-    if (jumpBufferTimerLocal > 0f)
-    {
-        jumpBufferTimerLocal -= Time.deltaTime;
-
-        // ✅ Intentar ejecutar salto buffereado
-        if ((controller.isGrounded || Time.time - lastGroundedTime <= coyoteTime) && canJump && !isAttacking)
-        {
-            DoJump();
-            jumpBufferTimerLocal = 0f;
         }
     }
 }
@@ -896,23 +882,20 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
-		// Guardar input de salto (jump buffer)
-		jumpBufferTimerLocal = jumpBufferTime;
-
-		// ✅ Verificar si estamos atacando
+		// ⛔ IGNORAR completamente si estamos atacando
 		if (isAttacking) return;
 
-		// ✅ Si no podemos saltar pero estamos en el suelo, permitir saltar (fix para bug de salto único)
-		if (!canJump && controller.isGrounded && jumpCooldownTimer <= 0f)
-		{
-			canJump = true;
-		}
+		// ⛔ IGNORAR si estamos en cooldown (evita spam de inputs)
+		if (jumpCooldownTimer > 0f) return;
 
-		// ✅ Verificar si podemos saltar
-		if (!canJump) return;
+		// ⛔ IGNORAR si ya saltamos y no hemos aterrizando
+		if (hasJumped && !controller.isGrounded) return;
 
-		// Si estamos en ground o dentro del coyote time, ejecutar salto ahora
-		if (controller.isGrounded || Time.time - lastGroundedTime <= coyoteTime)
+		// ✅ Solo aceptar salto si:
+		// 1. Estamos en el suelo O dentro del coyote time
+		// 2. canJump está activado
+		// 3. No hay cooldown activo
+		if ((controller.isGrounded || Time.time - lastGroundedTime <= coyoteTime) && canJump)
 		{
 			DoJump();
 		}
