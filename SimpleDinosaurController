@@ -881,21 +881,41 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
+		// 🐛 DEBUG: Imprimir estado
+		Debug.Log($"TryJump() - isGrounded: {controller.isGrounded}, canJump: {canJump}, isAttacking: {isAttacking}, cooldown: {jumpCooldownTimer}");
+
 		// ✅ Verificaciones simples - el botón ya debería estar deshabilitado
-		if (!controller.isGrounded) return;
-		if (!canJump) return;
-		if (isAttacking) return;
+		if (!controller.isGrounded)
+		{
+			Debug.Log("❌ No puede saltar: NO está en el suelo");
+			return;
+		}
+		if (!canJump)
+		{
+			Debug.Log("❌ No puede saltar: canJump es FALSE");
+			return;
+		}
+		if (isAttacking)
+		{
+			Debug.Log("❌ No puede saltar: está ATACANDO");
+			return;
+		}
 
 		// Ejecutar salto
+		Debug.Log("✅ EJECUTANDO SALTO!");
 		DoJump();
 	}
 	
 private void DoJump()
 {
+    Debug.Log($"🚀 DoJump() EJECUTADO - Estableciendo: canJump=false, hasJumped=true, cooldown={jumpCooldown}");
+
     velocity.y = Mathf.Sqrt(Mathf.Max(0.0001f, jumpHeight) * -2f * gravity);
     canJump = false;
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
+
+    Debug.Log($"🚀 velocity.y = {velocity.y}, jumpCooldownTimer = {jumpCooldownTimer}");
 
     if (animator != null)
     {
@@ -923,6 +943,7 @@ void UpdateTimers()
         {
             jumpCooldownTimer = 0f;
             canJump = true;  // ✅ Resetear aquí cuando el cooldown termine
+            Debug.Log("⏰ COOLDOWN TERMINADO - canJump ahora es TRUE");
         }
     }
 
@@ -978,6 +999,12 @@ void UpdateTimers()
         {
             bool canJumpNow = controller.isGrounded && canJump && !isAttacking;
             jumpButton.interactable = canJumpNow;
+
+            // 🐛 DEBUG cada 60 frames (1 segundo aprox)
+            if (Time.frameCount % 60 == 0)
+            {
+                Debug.Log($"UpdateUI() - Botón Jump: {(canJumpNow ? "✅ HABILITADO" : "🔴 DESHABILITADO")} | isGrounded: {controller.isGrounded} | canJump: {canJump} | isAttacking: {isAttacking} | cooldown: {jumpCooldownTimer}");
+            }
 
             // Cambiar color visual para feedback
             ColorBlock colors = jumpButton.colors;
