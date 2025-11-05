@@ -49,8 +49,8 @@ public class SimpleDinosaurController : MonoBehaviour
     [Header("⭐ CONFIGURACIÓN DE SALTO")]
     [Tooltip("Altura del salto")]
     public float jumpHeight = 2f;
-    [Tooltip("Tiempo de espera entre saltos")]
-    public float jumpCooldown = 0.5f;
+    [Tooltip("Tiempo de espera entre saltos (después de aterrizar)")]
+    public float jumpCooldown = 1f;
 	
 	[Header("⭐ SALTO - Coyote & Buffer")]
 	[Tooltip("Tiempo (s) que permitido saltar después de despegar (coyote time)")]
@@ -882,23 +882,15 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
-		// ⛔ IGNORAR completamente si estamos atacando
+		// ✅ El botón ya está deshabilitado en la UI cuando no se puede saltar
+		// Solo verificamos condiciones básicas por seguridad
 		if (isAttacking) return;
-
-		// ⛔ IGNORAR si estamos en cooldown (evita spam de inputs)
+		if (!controller.isGrounded) return;
 		if (jumpCooldownTimer > 0f) return;
+		if (!canJump) return;
 
-		// ⛔ IGNORAR si ya saltamos y no hemos aterrizando
-		if (hasJumped && !controller.isGrounded) return;
-
-		// ✅ Solo aceptar salto si:
-		// 1. Estamos en el suelo O dentro del coyote time
-		// 2. canJump está activado
-		// 3. No hay cooldown activo
-		if ((controller.isGrounded || Time.time - lastGroundedTime <= coyoteTime) && canJump)
-		{
-			DoJump();
-		}
+		// Ejecutar salto
+		DoJump();
 	}
 	
 private void DoJump()
@@ -981,7 +973,19 @@ void UpdateTimers()
             colors.normalColor = isRunning ? Color.green : Color.white;
             runButton.colors = colors;
         }
-        
+
+        // ✅ DESHABILITAR BOTÓN DE SALTO cuando no se puede usar
+        if (jumpButton != null)
+        {
+            bool canJumpNow = controller.isGrounded && canJump && jumpCooldownTimer <= 0f && !isAttacking;
+            jumpButton.interactable = canJumpNow;
+
+            // Cambiar color visual para feedback
+            ColorBlock colors = jumpButton.colors;
+            colors.normalColor = canJumpNow ? Color.white : Color.gray;
+            jumpButton.colors = colors;
+        }
+
         if (attackButton != null)
         {
             ColorBlock colors = attackButton.colors;
