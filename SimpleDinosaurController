@@ -1,0 +1,1160 @@
+using UnityEngine;
+using UnityEngine.UI;
+using System.Collections.Generic;
+
+// VERSIÓN CORREGIDA - FIX PARA PROBLEMA DE JOYSTICK
+// ✅ Separación correcta de rotación horizontal y alineación con terreno
+// ✅ Sin conflictos de dirección al girar
+// ✅ Movimiento suave y predecible
+
+public class SimpleDinosaurController : MonoBehaviour
+{
+    [Header("Referencias")]
+    public Animator animator;
+    public AudioSource audioSource;
+    public Transform cameraTransform;
+    
+    [Header("Controles Táctiles")]
+    public VariableJoystick movementJoystick;
+    public Button runButton;
+    public Button callButton;
+    public Button jumpButton;
+    public Button attackButton;
+    
+    [Header("Velocidades")]
+    public float walkSpeed = 2f;
+    public float runSpeed = 5f;
+    public float turnSpeed = 120f;
+    
+    [Header("🔄 CONFIGURACIÓN DE RADIO DE GIRO - MEJORADO")]
+    [Tooltip("Radio mínimo de giro al caminar")]
+    public float walkTurnRadius = 1.5f;
+    [Tooltip("Radio mínimo de giro al correr")]
+    public float runTurnRadius = 3f;
+    [Tooltip("Suavizado del giro (más alto = más suave)")]
+    [Range(1f, 10f)]
+    public float turnSmoothness = 5f;
+    [Tooltip("Velocidad máxima de rotación (grados/segundo)")]
+    public float maxRotationSpeed = 180f;
+    [Tooltip("Factor de suavizado de dirección")]
+    [Range(0.1f, 1f)]
+    public float directionSmoothFactor = 0.3f;
+    [Tooltip("Tolerancia para considerar que el dinosaurio está mirando hacia el objetivo")]
+    [Range(5f, 45f)]
+    public float lookAtTolerance = 15f;
+    [Tooltip("Factor de velocidad durante el giro (reduce velocidad al girar)")]
+    [Range(0.3f, 1f)]
+    public float turningSpeedFactor = 0.7f;
+    
+    [Header("⭐ CONFIGURACIÓN DE SALTO")]
+    [Tooltip("Altura del salto")]
+    public float jumpHeight = 2f;
+    [Tooltip("Tiempo de espera entre saltos")]
+    public float jumpCooldown = 0.5f;
+	
+	[Header("⭐ SALTO - Coyote & Buffer")]
+	[Tooltip("Tiempo (s) que permitido saltar después de despegar (coyote time)")]
+	public float coyoteTime = 0.12f;
+	[Tooltip("Tiempo (s) para guardar input de salto antes de aterrizar (jump buffer)")]
+	public float jumpBufferTime = 0.12f;
+
+	private float lastGroundedTimeStamp = -10f;
+	private float jumpBufferTimerLocal = 0f;
+    
+    [Header("⭐ CONFIGURACIÓN DE GRAVEDAD")]
+    [Tooltip("Fuerza de gravedad (más negativo = cae más rápido)")]
+    public float gravity = -20f;
+    [Tooltip("Velocidad terminal de caída")]
+    public float terminalVelocity = -50f;
+    
+    [Header("🏔️ CONFIGURACIÓN DE PENDIENTES")]
+    [Tooltip("Multiplicador de velocidad en subidas (mayor = sube más rápido)")]
+    [Range(0.5f, 2f)]
+    public float slopeSpeedMultiplier = 1.2f;
+    [Tooltip("Fuerza extra al bajar pendientes")]
+    public float slopeForceDown = 10f;
+    [Tooltip("⭐ Alinear modelo con el terreno")]
+    public bool alignToTerrain = true;
+    [Tooltip("Velocidad de alineación con el terreno")]
+    [Range(1f, 20f)]
+    public float terrainAlignmentSpeed = 8f;
+    [Tooltip("Máximo ángulo de inclinación permitido")]
+    [Range(0f, 90f)]
+    public float maxTerrainTilt = 45f;
+    
+    [Header("⚔️ SISTEMA DE ATAQUE - MEJORADO")]
+    [Tooltip("Daño que hace cada ataque")]
+    public float attackDamage = 25f;
+    [Tooltip("Rango del ataque (distancia)")]
+    public float attackRange = 2f;
+    [Tooltip("Ángulo del ataque (cono frontal)")]
+    [Range(0f, 180f)]
+    public float attackAngle = 90f;
+    [Tooltip("⭐ Tiempo de espera entre ataques - REDUCIDO para mejor respuesta")]
+    public float attackCooldown = 0.5f;
+    [Tooltip("Duración del ataque (animación)")]
+    public float attackDuration = 0.5f;
+    [Tooltip("Layer de enemigos (objetos que pueden recibir daño)")]
+    public LayerMask enemyLayer;
+    [Tooltip("Punto desde donde sale el ataque (boca del dinosaurio)")]
+    public Transform attackPoint;
+    [Tooltip("Mostrar área de ataque en el editor")]
+    public bool showAttackGizmos = true;
+    
+    [Header("⚔️ NUEVAS MEJORAS DE ATAQUE")]
+    [Tooltip("⭐ Permitir buffer de input (guarda el ataque para después)")]
+    public bool enableAttackBuffer = true;
+    [Tooltip("⭐ Tiempo que se guarda el input de ataque")]
+    public float attackBufferTime = 0.3f;
+    [Tooltip("⭐ Tolerancia al estar 'en el suelo' para atacar")]
+    public float groundedTolerance = 0.2f;
+    [Tooltip("⭐ Permitir atacar en el aire")]
+    public bool canAttackInAir = true;
+    
+    [Header("⚔️ EFECTOS DE ATAQUE")]
+    [Tooltip("Fuerza de empuje al atacar")]
+    public float attackKnockback = 5f;
+    [Tooltip("Puede moverse mientras ataca")]
+    public bool canMoveWhileAttacking = false;
+    [Tooltip("Puede rotar mientras ataca")]
+    public bool canRotateWhileAttacking = true;
+    
+    [Header("🎵 AUDIO DE ATAQUE")]
+    public AudioClip[] attackSounds;
+    public AudioClip[] hitSounds;
+	
+	[Header("🎤 Call / Roar Settings")]
+	[Tooltip("Duración del rugido (segundos)")]
+	public float callDuration = 2.5f; // ajusta según la duración de tu animación
+	private bool isCalling = false;
+	private float callTimer = 0f;
+    
+    [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
+    [Tooltip("Activar poses estáticas de giro")]
+    public bool enableStaticTurn = true;
+    [Tooltip("Activar poses de mirada arriba/abajo")]
+    public bool enableVerticalLook = true;
+    [Tooltip("Umbral para detectar cambio de cámara (grados)")]
+    public float turnDetectionThreshold = 30f;
+    [Tooltip("Umbral para detectar cambio de cámara vertical (grados)")]
+    public float lookDetectionThreshold = 20f;
+    [Tooltip("Ángulo para detectar frente/atrás")]
+    public float frontBackAngle = 45f;
+    [Tooltip("Velocidad de transición entre poses de giro")]
+    [Range(1f, 10f)]
+    public float turnTransitionSpeed = 4f;
+    [Tooltip("Velocidad de transición entre poses de mirada vertical")]
+    [Range(1f, 10f)]
+    public float lookTransitionSpeed = 4f;
+    [Tooltip("⭐ Límite máximo de Turn y Look (evita poses estáticas)")]
+    [Range(0.5f, 1f)]
+    public float maxTurnLookValue = 0.80f;
+    
+    [Header("Configuración de Movimiento")]
+    public float turnInPlaceThreshold = 0.1f;
+    public float movementThreshold = 0.2f;
+    [Tooltip("Suavizado del movimiento")]
+    [Range(1f, 20f)]
+    public float movementSmoothness = 10f;
+    
+    [Header("Audio")]
+    public AudioClip[] walkSounds;
+    public AudioClip[] runSounds;
+    public AudioClip[] callSounds;
+    public AudioClip[] jumpSounds;
+    public AudioClip[] landSounds;
+    
+    // Estados
+    public enum MovementState
+    {
+        Idle = 0,
+        Walk = 1,
+        Run = 2,
+        Jump = 3,
+        Falling = 4,
+        Attacking = 5
+    }
+    
+    public enum TurnState
+    {
+        Idle = 0,
+        TurnLeft = -1,
+        TurnRight = 1
+    }
+    
+    [Header("Estado Actual")]
+    public MovementState currentState = MovementState.Idle;
+    public TurnState currentTurnState = TurnState.Idle;
+    public bool isRunning = false;
+    public bool isOnSlope = false;
+    public float currentSlopeAngle = 0f;
+    public bool isAttacking = false;
+    public int enemiesInRange = 0;
+    
+    // Character Controller
+    private CharacterController controller;
+    
+    // Variables de movimiento
+    private Vector3 inputVector;
+    private Vector3 moveDirection;
+    private Vector3 velocity;
+    private float currentSpeed = 0f;
+    private float targetSpeed = 0f;
+    
+    // ⭐ VARIABLES DE RADIO DE GIRO NATURAL
+    private Vector3 currentMoveDirection;
+    private Vector3 targetMoveDirection;
+    private Vector3 smoothedMoveDirection;
+    private float currentTurnRadius = 0f;
+    
+    // ⭐ FIX: Variables separadas para rotación
+    private float currentYaw = 0f;  // Rotación horizontal (controlada por joystick)
+    private Quaternion terrainRotation = Quaternion.identity;  // Rotación del terreno (pitch/roll)
+    
+    // Variables de salto
+    private bool canJump = true;
+    private float jumpCooldownTimer = 0f;
+    private bool hasJumped = false;
+    private float lastGroundedTime = 0f;
+    
+    // Variables de ataque
+    private float attackCooldownTimer = 0f;
+    private float attackTimer = 0f;
+    private bool attackBuffered = false;
+    private float attackBufferTimer = 0f;
+    private List<GameObject> enemiesHit = new List<GameObject>();
+    
+    // Variables de detección de pendiente
+    private RaycastHit slopeHit;
+    private Vector3 slopeNormal;
+    
+    // ⭐ Variables para alineación con terreno
+    private Vector3 smoothNormal = Vector3.up;
+    
+    // Variables de animación Turn/Look basado en cámara
+    private float currentTurn = 0f;
+    private float targetTurn = 0f;
+    private float currentLook = 0f;
+    private float targetLook = 0f;
+    private float lastCameraAngle = 0f;
+    private float lastCameraVerticalAngle = 0f;
+	
+    
+    void Start()
+    {
+        controller = GetComponent<CharacterController>();
+        if (controller == null)
+        {
+            controller = gameObject.AddComponent<CharacterController>();
+            controller.height = 2f;
+            controller.center = new Vector3(0, 1f, 0);
+            controller.radius = 0.5f;
+        }
+        
+        if (animator == null)
+            animator = GetComponent<Animator>();
+        
+        if (audioSource == null)
+            audioSource = GetComponent<AudioSource>();
+        
+        if (cameraTransform == null)
+        {
+            Camera mainCam = Camera.main;
+            if (mainCam != null)
+                cameraTransform = mainCam.transform;
+        }
+        
+        if (attackPoint == null)
+            attackPoint = transform;
+        
+        // Inicializar rotación
+        currentYaw = transform.eulerAngles.y;
+        
+        SetupButtonListeners();
+    }
+    
+    void SetupButtonListeners()
+    {
+        if (runButton != null)
+        {
+            runButton.onClick.RemoveAllListeners();
+            runButton.onClick.AddListener(() => isRunning = !isRunning);
+        }
+        
+        if (callButton != null)
+        {
+            callButton.onClick.RemoveAllListeners();
+            callButton.onClick.AddListener(PlayCallSound);
+        }
+        
+        if (jumpButton != null)
+        {
+            jumpButton.onClick.RemoveAllListeners();
+            jumpButton.onClick.AddListener(TryJump);
+        }
+        
+        if (attackButton != null)
+        {
+            attackButton.onClick.RemoveAllListeners();
+            attackButton.onClick.AddListener(TryAttack);
+        }
+    }
+    
+    void Update()
+    {
+        // Leer input del joystick
+        GetInput();
+        
+        // Detectar pendientes
+        CheckSlope();
+        
+        // Calcular movimiento y rotación
+        CalculateMovement();
+        
+        // ⭐ FIX: Aplicar rotación separada
+        ApplySeparatedRotation();
+        
+        // Aplicar movimiento
+        ApplyMovement();
+        
+        // ⭐ Alinear con el terreno (solo afecta pitch/roll, no yaw)
+        if (alignToTerrain && controller.isGrounded)
+        {
+            AlignToTerrainFixed();
+        }
+        
+        // Actualizar animaciones
+        UpdateAnimations();
+        
+        // Actualizar sistema de ataque
+        UpdateAttackSystem();
+        
+        // Actualizar Turn y Look basado en cámara
+        UpdateCameraBasedTurnAndLook();
+        
+        // Actualizar timers
+        UpdateTimers();
+        
+        // Actualizar estado
+        UpdateState();
+        
+        // Actualizar UI
+        UpdateUI();
+    }
+    
+    void GetInput()
+    {
+        if (movementJoystick != null)
+        {
+            inputVector = new Vector3(movementJoystick.Horizontal, 0, movementJoystick.Vertical);
+        }
+        else
+        {
+            inputVector = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
+        }
+        
+        // Limitar magnitud
+        if (inputVector.magnitude > 1f)
+            inputVector = inputVector.normalized;
+    }
+    
+    void CheckSlope()
+    {
+        if (controller.isGrounded)
+        {
+            Vector3 origin = transform.position + Vector3.up * 0.5f;
+            if (Physics.Raycast(origin, Vector3.down, out slopeHit, controller.height))
+            {
+                slopeNormal = slopeHit.normal;
+                currentSlopeAngle = Vector3.Angle(Vector3.up, slopeNormal);
+                isOnSlope = currentSlopeAngle > 1f && currentSlopeAngle < controller.slopeLimit;
+            }
+            else
+            {
+                isOnSlope = false;
+                currentSlopeAngle = 0f;
+                slopeNormal = Vector3.up;
+            }
+        }
+        else
+        {
+            isOnSlope = false;
+            currentSlopeAngle = 0f;
+            slopeNormal = Vector3.up;
+        }
+    }
+    
+    void CalculateMovement()
+    {
+        // ⭐ FIX: Calcular dirección relativa a la cámara de forma más estable
+        if (inputVector.magnitude > turnInPlaceThreshold)
+        {
+            // Obtener vectores de la cámara
+            Vector3 cameraForward = cameraTransform.forward;
+            Vector3 cameraRight = cameraTransform.right;
+            
+            // Proyectar en plano horizontal
+            cameraForward.y = 0;
+            cameraRight.y = 0;
+            cameraForward.Normalize();
+            cameraRight.Normalize();
+            
+            // Calcular dirección deseada basada en el input del joystick
+            targetMoveDirection = (cameraForward * inputVector.z + cameraRight * inputVector.x).normalized;
+            
+            // Si estamos atacando y no podemos movernos, mantener dirección actual
+            if (isAttacking && !canMoveWhileAttacking)
+            {
+                targetMoveDirection = transform.forward;
+            }
+            
+            // Suavizar la dirección de movimiento
+            if (currentMoveDirection == Vector3.zero)
+            {
+                currentMoveDirection = targetMoveDirection;
+            }
+            else
+            {
+                currentMoveDirection = Vector3.Slerp(currentMoveDirection, targetMoveDirection, 
+                    Time.deltaTime * turnSmoothness);
+            }
+            
+            // Calcular velocidad objetivo
+            targetSpeed = isRunning ? runSpeed : walkSpeed;
+            
+            // Reducir velocidad durante el giro
+            float angleToTarget = Vector3.Angle(transform.forward, currentMoveDirection);
+            if (angleToTarget > lookAtTolerance)
+            {
+                targetSpeed *= turningSpeedFactor;
+            }
+            
+            // Aplicar modificador de pendiente
+            if (isOnSlope)
+            {
+                float slopeFactor = Vector3.Dot(currentMoveDirection, slopeNormal);
+                if (slopeFactor < 0) // Subiendo
+                {
+                    targetSpeed *= slopeSpeedMultiplier;
+                }
+            }
+        }
+        else
+        {
+            // Sin input
+            targetSpeed = 0f;
+            if (currentMoveDirection.magnitude > 0.1f)
+            {
+                currentMoveDirection = Vector3.Lerp(currentMoveDirection, Vector3.zero, Time.deltaTime * 5f);
+            }
+        }
+        
+        // Suavizar velocidad
+        currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * movementSmoothness);
+        
+        // Calcular dirección de movimiento final
+        moveDirection = transform.forward * currentSpeed;
+
+        
+        // Si no podemos movernos mientras atacamos
+        if (isAttacking && !canMoveWhileAttacking)
+        {
+            moveDirection = Vector3.zero;
+        }
+    }
+    
+void ApplySeparatedRotation()
+{
+    if (inputVector.magnitude > turnInPlaceThreshold)
+    {
+        if (!isAttacking || canRotateWhileAttacking)
+        {
+            if (targetMoveDirection != Vector3.zero)
+            {
+                // Calcular ángulo objetivo (dirección deseada)
+                float targetYaw = Mathf.Atan2(targetMoveDirection.x, targetMoveDirection.z) * Mathf.Rad2Deg;
+                float angleDifference = Mathf.DeltaAngle(currentYaw, targetYaw);
+
+                // Radio dinámico de giro (según velocidad)
+                currentTurnRadius = isRunning ? runTurnRadius : walkTurnRadius;
+
+                // Calcular velocidad de rotación
+                float rotationStep = Mathf.Clamp(angleDifference, -maxRotationSpeed * Time.deltaTime, maxRotationSpeed * Time.deltaTime);
+                currentYaw += rotationStep;
+
+                // Aplicar rotación suave al transform
+                Vector3 eulerRotation = transform.eulerAngles;
+                eulerRotation.y = currentYaw;
+                transform.eulerAngles = eulerRotation;
+
+                // ⭐ Actualizar dirección de movimiento para que siga la curva
+                Quaternion turnRotation = Quaternion.Euler(0f, rotationStep * (1f / currentTurnRadius), 0f);
+                currentMoveDirection = turnRotation * currentMoveDirection;
+
+                // Moverse siguiendo el giro
+                moveDirection = transform.forward * currentSpeed;
+            }
+        }
+    }
+    else
+    {
+        // Sin input, mantener orientación actual
+        Vector3 eulerRotation = transform.eulerAngles;
+        eulerRotation.y = currentYaw;
+        transform.eulerAngles = eulerRotation;
+    }
+}
+
+
+    
+void ApplyMovement()
+{
+    // Mantener pegado al suelo (evita saltos falsos cuando ya está en tierra)
+    if (controller.isGrounded && velocity.y < 0f)
+    {
+        velocity.y = -2f;
+    }
+
+    // Aplicar gravedad
+    velocity.y += gravity * Time.deltaTime;
+    velocity.y = Mathf.Max(velocity.y, terminalVelocity);
+
+    // Comprobar si toca suelo
+    if (controller.isGrounded)
+    {
+        lastGroundedTimeStamp = Time.time;
+
+        // 🔹 Restablecer salto al aterrizar
+        if (!canJump)
+        {
+            canJump = true;
+        }
+
+        // 🔹 Resetear estado si venía de un salto
+        if (hasJumped)
+        {
+            hasJumped = false;
+        }
+    }
+
+    // Aplicar fuerza adicional si está en pendiente
+    if (isOnSlope && controller.isGrounded)
+    {
+        velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+    }
+
+    // Combinar movimiento horizontal y vertical
+    Vector3 finalMove = moveDirection + velocity;
+
+    // Aplicar movimiento
+    controller.Move(finalMove * Time.deltaTime);
+
+    // Guardar tiempo del último grounded
+    if (controller.isGrounded)
+    {
+        lastGroundedTime = Time.time;
+    }
+
+    // 🔹 Jump buffer (si presionó salto antes de tocar suelo)
+    if (jumpBufferTimerLocal > 0f)
+    {
+        jumpBufferTimerLocal -= Time.deltaTime;
+        if ((controller.isGrounded || Time.time - lastGroundedTimeStamp <= coyoteTime) && canJump && !isAttacking)
+        {
+            DoJump();
+            jumpBufferTimerLocal = 0f;
+        }
+    }
+}
+
+
+    
+    void AlignToTerrainFixed()
+    {
+        // ⭐ FIX: Nueva implementación que no afecta la rotación Y
+        
+        // Detectar el terreno debajo
+        Vector3 rayOrigin = transform.position + Vector3.up * 0.1f;
+        RaycastHit hit;
+        
+        Vector3 targetNormal = Vector3.up;
+        
+        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, 5f))
+        {
+            targetNormal = hit.normal;
+            
+            // Limitar el ángulo máximo de inclinación
+            float angleFromUp = Vector3.Angle(Vector3.up, targetNormal);
+            if (angleFromUp > maxTerrainTilt)
+            {
+                targetNormal = Vector3.Lerp(targetNormal, Vector3.up, 
+                    (angleFromUp - maxTerrainTilt) / angleFromUp);
+            }
+        }
+        
+        // Suavizar la normal
+        smoothNormal = Vector3.Slerp(smoothNormal, targetNormal, Time.deltaTime * terrainAlignmentSpeed);
+        
+        // ⭐ FIX: Calcular rotación del terreno sin afectar Y
+        // Crear una rotación que alinee con el terreno pero mantenga el yaw actual
+        Vector3 forward = Quaternion.Euler(0, currentYaw, 0) * Vector3.forward;
+        Vector3 projectedForward = Vector3.ProjectOnPlane(forward, smoothNormal).normalized;
+        
+        if (projectedForward.magnitude > 0.1f)
+        {
+            // Crear quaternion que mira hacia adelante con la normal del terreno
+            Quaternion targetTerrainRotation = Quaternion.LookRotation(projectedForward, smoothNormal);
+            
+            // ⭐ FIX: Extraer solo pitch y roll, manteniendo el yaw actual
+            Vector3 terrainEuler = targetTerrainRotation.eulerAngles;
+            terrainEuler.y = currentYaw; // Forzar el yaw a mantenerse
+            
+            // Aplicar la rotación final
+            Quaternion finalRotation = Quaternion.Euler(terrainEuler);
+            transform.rotation = Quaternion.Slerp(transform.rotation, finalRotation, 
+                Time.deltaTime * terrainAlignmentSpeed);
+        }
+    }
+    
+void UpdateAnimations()
+{
+    if (animator == null) return;
+
+    // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo)
+    float normalizedSpeed = currentSpeed / runSpeed;
+    animator.SetFloat("Speed", normalizedSpeed);
+
+    // 🔹 2. Estados principales
+    animator.SetBool("IsGrounded", controller.isGrounded);
+    animator.SetBool("IsRunning", isRunning);
+    animator.SetBool("IsAttacking", isAttacking);
+    animator.SetFloat("VerticalSpeed", velocity.y);
+
+    // 🔹 3. Parámetros de dirección (si los usas en tu blend tree)
+    if (inputVector.magnitude > 0.1f)
+    {
+        Vector3 localMove = transform.InverseTransformDirection(currentMoveDirection);
+        animator.SetFloat("MoveX", localMove.x);
+        animator.SetFloat("MoveZ", localMove.z);
+    }
+    else
+    {
+        animator.SetFloat("MoveX", 0f);
+        animator.SetFloat("MoveZ", 0f);
+    }
+
+    // 🔹 4. Parámetros de cámara / mirada
+    animator.SetFloat("Turn", currentTurn);
+    animator.SetFloat("Look", currentLook);
+
+
+}
+
+    
+    void UpdateCameraBasedTurnAndLook()
+    {
+        if (!enableStaticTurn || cameraTransform == null) 
+        {
+            currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * turnTransitionSpeed);
+            currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * lookTransitionSpeed);
+            return;
+        }
+        
+        // Sistema de Turn basado en la diferencia entre cámara y dinosaurio
+        Vector3 cameraForward = cameraTransform.forward;
+        cameraForward.y = 0;
+        cameraForward.Normalize();
+        
+        Vector3 dinoForward = transform.forward;
+        dinoForward.y = 0;
+        dinoForward.Normalize();
+        
+        float angleToCamera = Vector3.SignedAngle(dinoForward, cameraForward, Vector3.up);
+        
+        // Determinar el estado de Turn basado en el ángulo
+        if (Mathf.Abs(angleToCamera) > turnDetectionThreshold)
+        {
+            if (angleToCamera > 0)
+            {
+                targetTurn = Mathf.Min(angleToCamera / 90f, maxTurnLookValue); // Girar a la derecha
+                currentTurnState = TurnState.TurnRight;
+            }
+            else
+            {
+                targetTurn = Mathf.Max(angleToCamera / 90f, -maxTurnLookValue); // Girar a la izquierda
+                currentTurnState = TurnState.TurnLeft;
+            }
+        }
+        else
+        {
+            targetTurn = 0f;
+            currentTurnState = TurnState.Idle;
+        }
+        
+        // Sistema de Look (vertical)
+        if (enableVerticalLook)
+        {
+            float cameraPitch = cameraTransform.eulerAngles.x;
+            if (cameraPitch > 180f) cameraPitch -= 360f;
+            
+            if (Mathf.Abs(cameraPitch) > lookDetectionThreshold)
+            {
+                if (cameraPitch < 0) // Mirando hacia arriba
+                {
+                    targetLook = Mathf.Min(-cameraPitch / 45f, maxTurnLookValue);
+                }
+                else // Mirando hacia abajo
+                {
+                    targetLook = Mathf.Max(-cameraPitch / 45f, -maxTurnLookValue);
+                }
+            }
+            else
+            {
+                targetLook = 0f;
+            }
+        }
+        else
+        {
+            targetLook = 0f;
+        }
+        
+        // Suavizar las transiciones
+        currentTurn = Mathf.Lerp(currentTurn, targetTurn, Time.deltaTime * turnTransitionSpeed);
+        currentLook = Mathf.Lerp(currentLook, targetLook, Time.deltaTime * lookTransitionSpeed);
+        
+        // Limitar valores máximos
+        currentTurn = Mathf.Clamp(currentTurn, -maxTurnLookValue, maxTurnLookValue);
+        currentLook = Mathf.Clamp(currentLook, -maxTurnLookValue, maxTurnLookValue);
+    }
+    
+    void UpdateAttackSystem()
+    {
+        // Detectar enemigos en rango
+        DetectEnemiesInRange();
+        
+        // Procesar buffer de ataque
+        if (enableAttackBuffer && attackBuffered)
+        {
+            attackBufferTimer -= Time.deltaTime;
+            if (attackBufferTimer <= 0f)
+            {
+                attackBuffered = false;
+            }
+            
+            // Intentar ejecutar el ataque buffereado
+            if (attackCooldownTimer <= 0f && !isAttacking)
+            {
+                ExecuteAttack();
+                attackBuffered = false;
+            }
+        }
+        
+        // Timer del ataque actual
+        if (isAttacking)
+        {
+            attackTimer -= Time.deltaTime;
+            if (attackTimer <= 0f)
+            {
+                EndAttack();
+            }
+        }
+		
+		if (isCalling)
+	{
+		callTimer -= Time.deltaTime;
+
+		// Evitar ataque mientras ruge
+		isAttacking = false;
+
+		// Cuando termina el rugido
+		if (callTimer <= 0f)
+		{
+			isCalling = false;
+		}
+	}
+        
+        // Cooldown
+        if (attackCooldownTimer > 0f)
+        {
+            attackCooldownTimer -= Time.deltaTime;
+        }
+    }
+    
+    void DetectEnemiesInRange()
+    {
+        Vector3 attackPosition = attackPoint != null ? attackPoint.position : transform.position + transform.forward * 1f;
+        Collider[] nearbyEnemies = Physics.OverlapSphere(attackPosition, attackRange * 1.5f, enemyLayer);
+        
+        enemiesInRange = 0;
+        foreach (Collider enemy in nearbyEnemies)
+        {
+            Vector3 directionToEnemy = (enemy.transform.position - transform.position).normalized;
+            float angleToEnemy = Vector3.Angle(transform.forward, directionToEnemy);
+            
+            if (angleToEnemy <= attackAngle / 2f)
+            {
+                float distanceToEnemy = Vector3.Distance(transform.position, enemy.transform.position);
+                if (distanceToEnemy <= attackRange)
+                {
+                    enemiesInRange++;
+                }
+            }
+        }
+    }
+    
+    public void TryAttack()
+    {
+		if (isCalling) return;
+        bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir) 
+                           && attackCooldownTimer <= 0f 
+                           && !isAttacking;
+        
+        if (canAttackNow)
+        {
+            ExecuteAttack();
+        }
+        else if (enableAttackBuffer)
+        {
+            attackBuffered = true;
+            attackBufferTimer = attackBufferTime;
+        }
+    }
+    
+    void ExecuteAttack()
+    {
+        isAttacking = true;
+        attackTimer = attackDuration;
+        attackCooldownTimer = attackCooldown;
+        currentState = MovementState.Attacking;
+        
+        // Limpiar lista de enemigos golpeados
+        enemiesHit.Clear();
+        
+        // Animación
+        if (animator != null)
+        {
+            animator.SetTrigger("Attack");
+        }
+        
+        // Sonido
+        PlayAttackSound();
+        
+        // Hacer daño inmediatamente
+        PerformAttackDamage();
+    }
+    
+    void PerformAttackDamage()
+    {
+        Vector3 attackPosition = attackPoint != null ? attackPoint.position : transform.position + transform.forward * 1f;
+        
+        // Detectar enemigos en el área de ataque
+        Collider[] hitColliders = Physics.OverlapSphere(attackPosition, attackRange, enemyLayer);
+        
+        foreach (Collider hit in hitColliders)
+        {
+            if (enemiesHit.Contains(hit.gameObject))
+                continue;
+                
+            Vector3 directionToTarget = (hit.transform.position - transform.position).normalized;
+            float angleToTarget = Vector3.Angle(transform.forward, directionToTarget);
+            
+            if (angleToTarget <= attackAngle / 2f)
+            {
+                enemiesHit.Add(hit.gameObject);
+                
+                // Aplicar daño
+                IDamageable damageable = hit.GetComponent<IDamageable>();
+                if (damageable != null)
+                {
+                    damageable.TakeDamage(attackDamage);
+                }
+                
+                // Aplicar knockback
+                if (attackKnockback > 0f)
+                {
+                    Rigidbody rb = hit.GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        Vector3 knockbackDirection = directionToTarget;
+                        knockbackDirection.y = 0.3f;
+                        rb.AddForce(knockbackDirection.normalized * attackKnockback, ForceMode.Impulse);
+                    }
+                }
+                
+                // Sonido de impacto
+                PlayHitSound();
+            }
+        }
+    }
+    
+    void EndAttack()
+    {
+        isAttacking = false;
+        enemiesHit.Clear();
+        
+        if (controller.isGrounded)
+        {
+            currentState = inputVector.magnitude > movementThreshold ? 
+                (isRunning ? MovementState.Run : MovementState.Walk) : MovementState.Idle;
+        }
+    }
+    
+	public void TryJump()
+	{
+		// Guardar input de salto (jump buffer)
+		jumpBufferTimerLocal = jumpBufferTime;
+
+		// Si ya estamos atacando o no podemos saltar, simplemente retornamos (el buffer guardará el intento)
+		if (isAttacking || !canJump) return;
+
+		// Si estamos en ground o dentro del coyote time, ejecutar salto ahora
+		if (controller.isGrounded || Time.time - lastGroundedTimeStamp <= coyoteTime)
+		{
+			DoJump();
+		}
+	}
+	
+private void DoJump()
+{
+    velocity.y = Mathf.Sqrt(Mathf.Max(0.0001f, jumpHeight) * -2f * gravity);
+    canJump = false;
+    hasJumped = true;
+    jumpCooldownTimer = jumpCooldown;
+
+    if (animator != null)
+    {
+        animator.ResetTrigger("Jump");
+        animator.SetTrigger("Jump");
+        animator.SetBool("IsGrounded", false);
+        animator.SetFloat("VerticalSpeed", velocity.y);
+    }
+
+    PlayJumpSound();
+}
+
+
+
+    
+void UpdateTimers()
+{
+    // Control del cooldown de salto
+    if (!canJump)
+    {
+        jumpCooldownTimer -= Time.deltaTime;
+        if (jumpCooldownTimer <= 0f)
+        {
+            // No habilitamos canJump aquí — se reactiva automáticamente al aterrizar
+            jumpCooldownTimer = 0f;
+        }
+    }
+
+    // Control del cooldown del ataque (mantener el tuyo original)
+    if (attackCooldownTimer > 0f)
+    {
+        attackCooldownTimer -= Time.deltaTime;
+    }
+
+    // Control del buffer de ataque (si lo tienes activo)
+    if (enableAttackBuffer && attackBuffered)
+    {
+        attackBufferTimer -= Time.deltaTime;
+        if (attackBufferTimer <= 0f)
+        {
+            attackBuffered = false;
+        }
+    }
+}
+
+    
+    void UpdateState()
+    {
+        if (isAttacking)
+        {
+            currentState = MovementState.Attacking;
+        }
+        else if (!controller.isGrounded)
+        {
+            currentState = velocity.y > 0 ? MovementState.Jump : MovementState.Falling;
+        }
+        else if (currentSpeed > movementThreshold)
+        {
+            currentState = isRunning ? MovementState.Run : MovementState.Walk;
+        }
+        else
+        {
+            currentState = MovementState.Idle;
+        }
+    }
+    
+    void UpdateUI()
+    {
+        if (runButton != null)
+        {
+            ColorBlock colors = runButton.colors;
+            colors.normalColor = isRunning ? Color.green : Color.white;
+            runButton.colors = colors;
+        }
+        
+        if (attackButton != null)
+        {
+            ColorBlock colors = attackButton.colors;
+            if (isAttacking)
+                colors.normalColor = Color.red;
+            else if (attackCooldownTimer > 0)
+                colors.normalColor = Color.gray;
+            else if (enemiesInRange > 0)
+                colors.normalColor = Color.yellow;
+            else
+                colors.normalColor = Color.white;
+            attackButton.colors = colors;
+        }
+    }
+    
+    // Métodos de audio
+	void PlayCallSound()
+	{
+		// Si ya está rugiendo o atacando, no permitir otro rugido
+		if (isCalling || isAttacking) return;
+
+		// Activar rugido
+		isCalling = true;
+		callTimer = callDuration;
+
+		// Sonido de rugido
+		if (audioSource != null && callSounds.Length > 0)
+		{
+			AudioClip clip = callSounds[Random.Range(0, callSounds.Length)];
+			audioSource.PlayOneShot(clip);
+		}
+
+		// Animación
+		if (animator != null)
+		{
+			animator.ResetTrigger("Attack");
+			animator.SetTrigger("Call");
+			animator.SetBool("IsAttacking", false);
+		}
+	}
+
+    
+    void PlayJumpSound()
+    {
+        if (audioSource != null && jumpSounds.Length > 0)
+        {
+            AudioClip clip = jumpSounds[Random.Range(0, jumpSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+    
+    void PlayAttackSound()
+    {
+        if (audioSource != null && attackSounds.Length > 0)
+        {
+            AudioClip clip = attackSounds[Random.Range(0, attackSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+    
+    void PlayHitSound()
+    {
+        if (audioSource != null && hitSounds.Length > 0)
+        {
+            AudioClip clip = hitSounds[Random.Range(0, hitSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+    
+    // Métodos de pasos (llamados por eventos de animación)
+    public void PlayFootstep()
+    {
+        if (audioSource != null)
+        {
+            AudioClip[] clips = isRunning ? runSounds : walkSounds;
+            if (clips.Length > 0)
+            {
+                AudioClip clip = clips[Random.Range(0, clips.Length)];
+                audioSource.PlayOneShot(clip, 0.7f);
+            }
+        }
+    }
+    
+    public void PlayLandSound()
+    {
+        if (audioSource != null && landSounds.Length > 0)
+        {
+            AudioClip clip = landSounds[Random.Range(0, landSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+    
+    void OnDrawGizmosSelected()
+    {
+        if (!showAttackGizmos) return;
+        
+        Vector3 attackPosition = attackPoint != null ? attackPoint.position : transform.position + transform.forward * 1f;
+        
+        // Gizmos de ataque
+        Gizmos.color = isAttacking ? Color.red : (enemiesInRange > 0 ? Color.yellow : Color.cyan);
+        Gizmos.DrawWireSphere(attackPosition, attackRange);
+        
+        if (Application.isPlaying)
+        {
+            Gizmos.color = Color.red;
+            Vector3 forward = transform.forward;
+            Vector3 right = Quaternion.Euler(0, attackAngle / 2f, 0) * forward;
+            Vector3 left = Quaternion.Euler(0, -attackAngle / 2f, 0) * forward;
+            
+            Gizmos.DrawLine(transform.position, transform.position + right * attackRange);
+            Gizmos.DrawLine(transform.position, transform.position + left * attackRange);
+        }
+        
+        // Gizmos de ground detection
+        if (Application.isPlaying)
+        {
+            Vector3 rayStart = transform.position + Vector3.up * 0.5f;
+            Gizmos.color = controller != null && controller.isGrounded ? Color.green : Color.red;
+            Gizmos.DrawLine(rayStart, rayStart + Vector3.down * 2f);
+            
+            if (isOnSlope)
+            {
+                Gizmos.color = Color.yellow;
+                Gizmos.DrawLine(slopeHit.point, slopeHit.point + slopeHit.normal * 2f);
+            }
+            
+            // Gizmos de alineación con terreno
+            if (alignToTerrain)
+            {
+                // Mostrar normal suavizada del terreno
+                Gizmos.color = Color.magenta;
+                Gizmos.DrawLine(transform.position, transform.position + smoothNormal * 3f);
+                
+                // Mostrar up vector del transform
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawLine(transform.position, transform.position + transform.up * 2.5f);
+            }
+        }
+        
+        // Gizmos de dirección de movimiento
+        if (Application.isPlaying && currentMoveDirection != Vector3.zero)
+        {
+            // Dirección actual
+            Gizmos.color = Color.green;
+            Gizmos.DrawLine(transform.position + Vector3.up * 0.5f, 
+                           transform.position + Vector3.up * 0.5f + currentMoveDirection * 2f);
+            
+            // Dirección objetivo
+            if (targetMoveDirection != Vector3.zero)
+            {
+                Gizmos.color = Color.yellow;
+                Gizmos.DrawLine(transform.position + Vector3.up * 0.7f, 
+                               transform.position + Vector3.up * 0.7f + targetMoveDirection * 2f);
+            }
+        }
+    }
+}
+
+// Interface para objetos que pueden recibir daño
+public interface IDamageable
+{
+    void TakeDamage(float damage);
+}
