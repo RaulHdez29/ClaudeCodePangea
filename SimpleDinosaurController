@@ -20,7 +20,24 @@ public class SimpleDinosaurController : MonoBehaviour
     public Button callButton;
     public Button jumpButton;
     public Button attackButton;
-    
+
+    [Header("📏 CONFIGURACIÓN DE TAMAÑO DEL DINOSAURIO")]
+    [Tooltip("Selecciona el tamaño del dinosaurio para aplicar valores preconfigurados")]
+    public DinosaurSize dinosaurSize = DinosaurSize.Medium;
+    [Tooltip("Altura real del modelo (usado para cálculos automáticos)")]
+    public float modelHeight = 2.5f;
+    [Space(10)]
+    [Tooltip("Haz click derecho en el script → 'Apply Size Preset' para aplicar configuración automática")]
+    public bool autoConfigureOnStart = false;
+
+    public enum DinosaurSize
+    {
+        Small,      // 1-2m (Compsognathus, Velociraptor joven)
+        Medium,     // 3-5m (Velociraptor, Dilophosaurus)
+        Large,      // 6-10m (T-Rex, Spinosaurus)
+        Custom      // Valores manuales
+    }
+
     [Header("Velocidades")]
     public float walkSpeed = 2f;
     public float runSpeed = 5f;
@@ -292,7 +309,13 @@ public class SimpleDinosaurController : MonoBehaviour
         
         // Inicializar rotación
         currentYaw = transform.eulerAngles.y;
-        
+
+        // 📏 Auto-configurar tamaño si está activado
+        if (autoConfigureOnStart && dinosaurSize != DinosaurSize.Custom)
+        {
+            ApplySizePreset();
+        }
+
         SetupButtonListeners();
     }
     
@@ -322,7 +345,136 @@ public class SimpleDinosaurController : MonoBehaviour
             attackButton.onClick.AddListener(TryAttack);
         }
     }
-    
+
+    // 📏 SISTEMA DE CONFIGURACIÓN AUTOMÁTICA POR TAMAÑO
+    [ContextMenu("Apply Size Preset")]
+    public void ApplySizePreset()
+    {
+        if (dinosaurSize == DinosaurSize.Custom)
+        {
+            Debug.LogWarning("⚠️ Tamaño configurado como 'Custom'. No se aplicarán presets automáticos.");
+            return;
+        }
+
+        Debug.Log($"📏 Aplicando preset de tamaño: {dinosaurSize} (Altura: {modelHeight}m)");
+
+        switch (dinosaurSize)
+        {
+            case DinosaurSize.Small:
+                ApplySmallPreset();
+                break;
+            case DinosaurSize.Medium:
+                ApplyMediumPreset();
+                break;
+            case DinosaurSize.Large:
+                ApplyLargePreset();
+                break;
+        }
+
+        // Actualizar Character Controller
+        if (controller != null)
+        {
+            controller.height = modelHeight;
+            controller.radius = modelHeight * 0.2f;
+            controller.center = new Vector3(0, modelHeight * 0.5f, 0);
+        }
+
+        Debug.Log($"✅ Configuración aplicada: Walk={walkSpeed}, Run={runSpeed}, Swim={swimSpeed}, WaterOffset={waterSurfaceOffset}");
+    }
+
+    void ApplySmallPreset()
+    {
+        // Velocidades
+        walkSpeed = modelHeight * 1.2f;
+        runSpeed = modelHeight * 2.5f;
+        swimSpeed = modelHeight * 1.2f;
+        turnSpeed = 180f;
+
+        // Salto
+        jumpHeight = modelHeight * 0.8f;
+        jumpCooldown = 0.5f;
+
+        // Gravedad
+        gravity = -25f;
+        terminalVelocity = -40f;
+
+        // Agua
+        waterSurfaceOffset = modelHeight * 0.5f;
+        buoyancyForce = 15f;
+        waterDrag = 0.75f;
+
+        // Ataque
+        attackRange = modelHeight * 0.6f;
+        attackDamage = modelHeight * 10f;
+
+        // Giro
+        walkTurnRadius = 1.0f;
+        runTurnRadius = 2.0f;
+        maxRotationSpeed = 200f;
+    }
+
+    void ApplyMediumPreset()
+    {
+        // Velocidades
+        walkSpeed = modelHeight * 1.0f;
+        runSpeed = modelHeight * 2.2f;
+        swimSpeed = modelHeight * 1.2f;
+        turnSpeed = 120f;
+
+        // Salto
+        jumpHeight = modelHeight * 0.6f;
+        jumpCooldown = 1.0f;
+
+        // Gravedad
+        gravity = -20f;
+        terminalVelocity = -50f;
+
+        // Agua
+        waterSurfaceOffset = modelHeight * 0.45f;
+        buoyancyForce = 9.8f;
+        waterDrag = 0.80f;
+
+        // Ataque
+        attackRange = modelHeight * 0.5f;
+        attackDamage = modelHeight * 10f;
+
+        // Giro
+        walkTurnRadius = 1.5f;
+        runTurnRadius = 3.0f;
+        maxRotationSpeed = 180f;
+    }
+
+    void ApplyLargePreset()
+    {
+        // Velocidades
+        walkSpeed = modelHeight * 0.7f;
+        runSpeed = modelHeight * 1.6f;
+        swimSpeed = modelHeight * 0.9f;
+        turnSpeed = 90f;
+
+        // Salto
+        jumpHeight = modelHeight * 0.4f;
+        jumpCooldown = 2.0f;
+
+        // Gravedad
+        gravity = -15f;
+        terminalVelocity = -60f;
+
+        // Agua
+        waterSurfaceOffset = modelHeight * 0.4f;
+        buoyancyForce = 8f;
+        waterDrag = 0.85f;
+
+        // Ataque
+        attackRange = modelHeight * 0.5f;
+        attackDamage = modelHeight * 15f;
+
+        // Giro
+        walkTurnRadius = 2.5f;
+        runTurnRadius = 5.0f;
+        maxRotationSpeed = 120f;
+    }
+
     void Update()
     {
         // Leer input del joystick
