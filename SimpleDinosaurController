@@ -354,19 +354,19 @@ public class SimpleDinosaurController : MonoBehaviour
             runButton.onClick.RemoveAllListeners();
             runButton.onClick.AddListener(() => isRunning = !isRunning);
         }
-        
+
         if (callButton != null)
         {
             callButton.onClick.RemoveAllListeners();
             callButton.onClick.AddListener(PlayCallSound);
         }
-        
+
         if (jumpButton != null)
         {
             jumpButton.onClick.RemoveAllListeners();
             jumpButton.onClick.AddListener(TryJump);
         }
-        
+
         if (attackButton != null)
         {
             attackButton.onClick.RemoveAllListeners();
@@ -377,6 +377,11 @@ public class SimpleDinosaurController : MonoBehaviour
         {
             sleepButton.onClick.RemoveAllListeners();
             sleepButton.onClick.AddListener(ToggleSleep);
+            Debug.Log("✅ Sleep button listener configurado correctamente!");
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ sleepButton NO está asignado en el Inspector!");
         }
     }
 
@@ -1246,9 +1251,27 @@ private void DoJump()
 // 😴 SISTEMA DE SUEÑO
 public void ToggleSleep()
 {
+    Debug.Log($"🔵 ToggleSleep() llamado! Estado actual: {currentSleepState}");
+    Debug.Log($"   - isInWater: {isInWater}");
+    Debug.Log($"   - isAttacking: {isAttacking}");
+    Debug.Log($"   - controller.isGrounded: {controller.isGrounded}");
+
     // No permitir dormir si está en agua, atacando, saltando o en el aire
-    if (isInWater || isAttacking || !controller.isGrounded)
+    if (isInWater)
+    {
+        Debug.LogWarning("❌ No puede dormir: está en agua");
         return;
+    }
+    if (isAttacking)
+    {
+        Debug.LogWarning("❌ No puede dormir: está atacando");
+        return;
+    }
+    if (!controller.isGrounded)
+    {
+        Debug.LogWarning("❌ No puede dormir: no está en el suelo");
+        return;
+    }
 
     // Cambiar estado de sueño
     switch (currentSleepState)
@@ -1264,9 +1287,15 @@ public void ToggleSleep()
             {
                 animator.SetTrigger("SleepEnter");
                 animator.SetBool("IsSleeping", true);
+                animator.SetInteger("SleepState", (int)currentSleepState);
+                Debug.Log("✅ Animator triggers establecidos: SleepEnter trigger, IsSleeping=true, SleepState=" + (int)currentSleepState);
+            }
+            else
+            {
+                Debug.LogError("❌ Animator es NULL!");
             }
 
-            Debug.Log("😴 Entrando a dormir...");
+            Debug.Log("😴 Entrando a dormir... (Timer: " + sleepEnterDuration + "s)");
             break;
 
         case SleepState.Sleeping:
@@ -1278,14 +1307,19 @@ public void ToggleSleep()
             if (animator != null)
             {
                 animator.SetTrigger("SleepExit");
+                animator.SetInteger("SleepState", (int)currentSleepState);
+                Debug.Log("✅ Animator triggers establecidos: SleepExit trigger, SleepState=" + (int)currentSleepState);
             }
 
-            Debug.Log("🌅 Despertando...");
+            Debug.Log("🌅 Despertando... (Timer: " + sleepExitDuration + "s)");
             break;
 
         // No hacer nada si está en transición
         case SleepState.EnteringSleep:
+            Debug.LogWarning("⏳ Ya está entrando a dormir, espera...");
+            break;
         case SleepState.ExitingSleep:
+            Debug.LogWarning("⏳ Ya está despertando, espera...");
             break;
     }
 }
@@ -1309,7 +1343,13 @@ private void UpdateSleepSystem()
                     // Transición completa, ahora está completamente dormido
                     currentSleepState = SleepState.Sleeping;
                     currentState = MovementState.Sleeping;
-                    Debug.Log("💤 Durmiendo profundamente...");
+
+                    if (animator != null)
+                    {
+                        animator.SetInteger("SleepState", (int)currentSleepState);
+                    }
+
+                    Debug.Log("💤 Durmiendo profundamente... (SleepState actualizado a " + (int)currentSleepState + ")");
                     break;
 
                 case SleepState.ExitingSleep:
@@ -1320,9 +1360,10 @@ private void UpdateSleepSystem()
                     if (animator != null)
                     {
                         animator.SetBool("IsSleeping", false);
+                        animator.SetInteger("SleepState", (int)currentSleepState);
                     }
 
-                    Debug.Log("✅ Completamente despierto!");
+                    Debug.Log("✅ Completamente despierto! (IsSleeping=false, SleepState=" + (int)currentSleepState + ")");
                     break;
             }
         }
