@@ -20,7 +20,25 @@ public class SimpleDinosaurController : MonoBehaviour
     public Button callButton;
     public Button jumpButton;
     public Button attackButton;
-    
+    public Button sleepButton;
+
+    [Header("📏 CONFIGURACIÓN DE TAMAÑO DEL DINOSAURIO")]
+    [Tooltip("Selecciona el tamaño del dinosaurio para aplicar valores preconfigurados")]
+    public DinosaurSize dinosaurSize = DinosaurSize.Medium;
+    [Tooltip("Altura real del modelo (usado para cálculos automáticos)")]
+    public float modelHeight = 2.5f;
+    [Space(10)]
+    [Tooltip("Haz click derecho en el script → 'Apply Size Preset' para aplicar configuración automática")]
+    public bool autoConfigureOnStart = false;
+
+    public enum DinosaurSize
+    {
+        Small,      // 1-2m (Compsognathus, Velociraptor joven)
+        Medium,     // 3-5m (Velociraptor, Dilophosaurus)
+        Large,      // 6-10m (T-Rex, Spinosaurus)
+        Custom      // Valores manuales
+    }
+
     [Header("Velocidades")]
     public float walkSpeed = 2f;
     public float runSpeed = 5f;
@@ -49,8 +67,8 @@ public class SimpleDinosaurController : MonoBehaviour
     [Header("⭐ CONFIGURACIÓN DE SALTO")]
     [Tooltip("Altura del salto")]
     public float jumpHeight = 2f;
-    [Tooltip("Tiempo de espera entre saltos")]
-    public float jumpCooldown = 0.5f;
+    [Tooltip("Tiempo de espera entre saltos (después de aterrizar)")]
+    public float jumpCooldown = 1f;
 	
 	[Header("⭐ SALTO - Coyote & Buffer")]
 	[Tooltip("Tiempo (s) que permitido saltar después de despegar (coyote time)")]
@@ -58,7 +76,7 @@ public class SimpleDinosaurController : MonoBehaviour
 	[Tooltip("Tiempo (s) para guardar input de salto antes de aterrizar (jump buffer)")]
 	public float jumpBufferTime = 0.12f;
 
-	private float lastGroundedTimeStamp = -10f;
+	private float lastGroundedTime = -10f;  // ✅ Variable unificada
 	private float jumpBufferTimerLocal = 0f;
     
     [Header("⭐ CONFIGURACIÓN DE GRAVEDAD")]
@@ -163,7 +181,33 @@ public class SimpleDinosaurController : MonoBehaviour
     public AudioClip[] callSounds;
     public AudioClip[] jumpSounds;
     public AudioClip[] landSounds;
-    
+
+    [Header("🌊 SISTEMA DE NATACIÓN")]
+    [Tooltip("Layer del agua (debe tener Trigger activado)")]
+    public LayerMask waterLayer;
+    [Tooltip("Velocidad de natación")]
+    public float swimSpeed = 3f;
+    [Tooltip("Fuerza de flotación (empuje hacia arriba)")]
+    public float buoyancyForce = 9.8f;
+    [Tooltip("Resistencia del agua (frena movimiento)")]
+    [Range(0.5f, 0.95f)]
+    public float waterDrag = 0.8f;
+    [Tooltip("Altura del agua donde empieza a flotar")]
+    public float waterSurfaceOffset = 1f;
+    [Tooltip("Tolerancia para evitar parpadeo entre estados (0.5 = 50% del offset)")]
+    [Range(0.3f, 0.8f)]
+    public float waterHysteresis = 0.6f;
+    [Tooltip("Permitir salto desde el agua")]
+    public bool canJumpFromWater = false;
+
+    [Header("😴 SISTEMA DE SUEÑO")]
+    [Tooltip("Duración de la animación de entrar a dormir (segundos)")]
+    public float sleepEnterDuration = 2f;
+    [Tooltip("Duración de la animación de salir del sueño (segundos)")]
+    public float sleepExitDuration = 1.5f;
+    [Tooltip("Mostrar efectos Z al dormir")]
+    public bool showSleepEffects = true;
+
     // Estados
     public enum MovementState
     {
@@ -172,7 +216,20 @@ public class SimpleDinosaurController : MonoBehaviour
         Run = 2,
         Jump = 3,
         Falling = 4,
-        Attacking = 5
+        Attacking = 5,
+        Swimming = 6,
+        IdleSwim = 7,
+        SleepEnter = 8,
+        Sleeping = 9,
+        SleepExit = 10
+    }
+
+    public enum SleepState
+    {
+        Awake,
+        EnteringSleep,
+        Sleeping,
+        ExitingSleep
     }
     
     public enum TurnState
@@ -190,7 +247,14 @@ public class SimpleDinosaurController : MonoBehaviour
     public float currentSlopeAngle = 0f;
     public bool isAttacking = false;
     public int enemiesInRange = 0;
-    
+    public bool isInWater = false;
+    public bool isSwimming = false;
+
+    // 😴 Variables de estado de sueño
+    public SleepState currentSleepState = SleepState.Awake;
+    private bool isSleeping = false;
+    private float sleepStateTimer = 0f;
+
     // Character Controller
     private CharacterController controller;
     
@@ -215,7 +279,6 @@ public class SimpleDinosaurController : MonoBehaviour
     private bool canJump = true;
     private float jumpCooldownTimer = 0f;
     private bool hasJumped = false;
-    private float lastGroundedTime = 0f;
     
     // Variables de ataque
     private float attackCooldownTimer = 0f;
@@ -238,8 +301,13 @@ public class SimpleDinosaurController : MonoBehaviour
     private float targetLook = 0f;
     private float lastCameraAngle = 0f;
     private float lastCameraVerticalAngle = 0f;
-	
-    
+
+    // 🌊 Variables de natación
+    private Collider waterCollider = null;
+    private float waterSurfaceY = 0f;
+    private bool wasInWater = false;
+
+
     void Start()
     {
         controller = GetComponent<CharacterController>();
@@ -269,7 +337,13 @@ public class SimpleDinosaurController : MonoBehaviour
         
         // Inicializar rotación
         currentYaw = transform.eulerAngles.y;
-        
+
+        // 📏 Auto-configurar tamaño si está activado
+        if (autoConfigureOnStart && dinosaurSize != DinosaurSize.Custom)
+        {
+            ApplySizePreset();
+        }
+
         SetupButtonListeners();
     }
     
@@ -298,8 +372,146 @@ public class SimpleDinosaurController : MonoBehaviour
             attackButton.onClick.RemoveAllListeners();
             attackButton.onClick.AddListener(TryAttack);
         }
+
+        if (sleepButton != null)
+        {
+            sleepButton.onClick.RemoveAllListeners();
+            sleepButton.onClick.AddListener(ToggleSleep);
+        }
     }
-    
+
+    // 📏 SISTEMA DE CONFIGURACIÓN AUTOMÁTICA POR TAMAÑO
+    [ContextMenu("Apply Size Preset")]
+    public void ApplySizePreset()
+    {
+        if (dinosaurSize == DinosaurSize.Custom)
+        {
+            Debug.LogWarning("⚠️ Tamaño configurado como 'Custom'. No se aplicarán presets automáticos.");
+            return;
+        }
+
+        Debug.Log($"📏 Aplicando preset de tamaño: {dinosaurSize} (Altura: {modelHeight}m)");
+
+        switch (dinosaurSize)
+        {
+            case DinosaurSize.Small:
+                ApplySmallPreset();
+                break;
+            case DinosaurSize.Medium:
+                ApplyMediumPreset();
+                break;
+            case DinosaurSize.Large:
+                ApplyLargePreset();
+                break;
+        }
+
+        // Actualizar Character Controller
+        if (controller != null)
+        {
+            controller.height = modelHeight;
+            controller.radius = modelHeight * 0.2f;
+            controller.center = new Vector3(0, modelHeight * 0.5f, 0);
+        }
+
+        Debug.Log($"✅ Configuración aplicada: Walk={walkSpeed}, Run={runSpeed}, Swim={swimSpeed}, WaterOffset={waterSurfaceOffset}");
+    }
+
+    void ApplySmallPreset()
+    {
+        // Velocidades
+        walkSpeed = modelHeight * 1.2f;
+        runSpeed = modelHeight * 2.5f;
+        swimSpeed = modelHeight * 1.2f;
+        turnSpeed = 180f;
+
+        // Salto
+        jumpHeight = modelHeight * 0.8f;
+        jumpCooldown = 0.5f;
+
+        // Gravedad
+        gravity = -25f;
+        terminalVelocity = -40f;
+
+        // Agua
+        waterSurfaceOffset = modelHeight * 0.5f;
+        buoyancyForce = 15f;
+        waterDrag = 0.75f;
+        waterHysteresis = 0.6f;
+
+        // Ataque
+        attackRange = modelHeight * 0.6f;
+        attackDamage = modelHeight * 10f;
+
+        // Giro
+        walkTurnRadius = 1.0f;
+        runTurnRadius = 2.0f;
+        maxRotationSpeed = 200f;
+    }
+
+    void ApplyMediumPreset()
+    {
+        // Velocidades
+        walkSpeed = modelHeight * 1.0f;
+        runSpeed = modelHeight * 2.2f;
+        swimSpeed = modelHeight * 1.2f;
+        turnSpeed = 120f;
+
+        // Salto
+        jumpHeight = modelHeight * 0.6f;
+        jumpCooldown = 1.0f;
+
+        // Gravedad
+        gravity = -20f;
+        terminalVelocity = -50f;
+
+        // Agua
+        waterSurfaceOffset = modelHeight * 0.45f;
+        buoyancyForce = 9.8f;
+        waterDrag = 0.80f;
+        waterHysteresis = 0.6f;
+
+        // Ataque
+        attackRange = modelHeight * 0.5f;
+        attackDamage = modelHeight * 10f;
+
+        // Giro
+        walkTurnRadius = 1.5f;
+        runTurnRadius = 3.0f;
+        maxRotationSpeed = 180f;
+    }
+
+    void ApplyLargePreset()
+    {
+        // Velocidades
+        walkSpeed = modelHeight * 0.7f;
+        runSpeed = modelHeight * 1.6f;
+        swimSpeed = modelHeight * 0.9f;
+        turnSpeed = 90f;
+
+        // Salto
+        jumpHeight = modelHeight * 0.4f;
+        jumpCooldown = 2.0f;
+
+        // Gravedad
+        gravity = -15f;
+        terminalVelocity = -60f;
+
+        // Agua
+        waterSurfaceOffset = modelHeight * 0.4f;
+        buoyancyForce = 8f;
+        waterDrag = 0.85f;
+        waterHysteresis = 0.6f;
+
+        // Ataque
+        attackRange = modelHeight * 0.5f;
+        attackDamage = modelHeight * 15f;
+
+        // Giro
+        walkTurnRadius = 2.5f;
+        runTurnRadius = 5.0f;
+        maxRotationSpeed = 120f;
+    }
+
     void Update()
     {
         // Leer input del joystick
@@ -316,13 +528,20 @@ public class SimpleDinosaurController : MonoBehaviour
         
         // Aplicar movimiento
         ApplyMovement();
-        
+
         // ⭐ Alinear con el terreno (solo afecta pitch/roll, no yaw)
-        if (alignToTerrain && controller.isGrounded)
+        // 🌊 NO alinear cuando está nadando
+        if (alignToTerrain && controller.isGrounded && !isSwimming)
         {
             AlignToTerrainFixed();
         }
-        
+
+        // 🌊 Resetear rotación a horizontal cuando está nadando
+        if (isSwimming)
+        {
+            ResetRotationToHorizontal();
+        }
+
         // Actualizar animaciones
         UpdateAnimations();
         
@@ -331,19 +550,29 @@ public class SimpleDinosaurController : MonoBehaviour
         
         // Actualizar Turn y Look basado en cámara
         UpdateCameraBasedTurnAndLook();
-        
+
+        // Actualizar sistema de sueño
+        UpdateSleepSystem();
+
         // Actualizar timers
         UpdateTimers();
-        
+
         // Actualizar estado
         UpdateState();
-        
+
         // Actualizar UI
         UpdateUI();
     }
     
     void GetInput()
     {
+        // 😴 No leer input si está durmiendo
+        if (isSleeping)
+        {
+            inputVector = Vector3.zero;
+            return;
+        }
+
         if (movementJoystick != null)
         {
             inputVector = new Vector3(movementJoystick.Horizontal, 0, movementJoystick.Vertical);
@@ -352,7 +581,7 @@ public class SimpleDinosaurController : MonoBehaviour
         {
             inputVector = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
         }
-        
+
         // Limitar magnitud
         if (inputVector.magnitude > 1f)
             inputVector = inputVector.normalized;
@@ -419,18 +648,28 @@ public class SimpleDinosaurController : MonoBehaviour
                     Time.deltaTime * turnSmoothness);
             }
             
-            // Calcular velocidad objetivo
-            targetSpeed = isRunning ? runSpeed : walkSpeed;
-            
-            // Reducir velocidad durante el giro
-            float angleToTarget = Vector3.Angle(transform.forward, currentMoveDirection);
-            if (angleToTarget > lookAtTolerance)
+            // 🌊 Calcular velocidad objetivo (diferente en agua)
+            if (isInWater && isSwimming)
             {
-                targetSpeed *= turningSpeedFactor;
+                targetSpeed = swimSpeed;  // Velocidad de natación
             }
-            
-            // Aplicar modificador de pendiente
-            if (isOnSlope)
+            else
+            {
+                targetSpeed = isRunning ? runSpeed : walkSpeed;
+            }
+
+            // Reducir velocidad durante el giro (no aplica en agua)
+            if (!isInWater)
+            {
+                float angleToTarget = Vector3.Angle(transform.forward, currentMoveDirection);
+                if (angleToTarget > lookAtTolerance)
+                {
+                    targetSpeed *= turningSpeedFactor;
+                }
+            }
+
+            // Aplicar modificador de pendiente (no aplica en agua)
+            if (isOnSlope && !isInWater)
             {
                 float slopeFactor = Vector3.Dot(currentMoveDirection, slopeNormal);
                 if (slopeFactor < 0) // Subiendo
@@ -509,38 +748,83 @@ void ApplySeparatedRotation()
     
 void ApplyMovement()
 {
-    // Mantener pegado al suelo (evita saltos falsos cuando ya está en tierra)
-    if (controller.isGrounded && velocity.y < 0f)
+    // ✅ ACTUALIZAR TIEMPO EN SUELO PRIMERO
+    bool wasGrounded = controller.isGrounded;
+
+    // 🌊 SISTEMA DE NATACIÓN
+    if (isInWater)
     {
-        velocity.y = -2f;
-    }
+        // ✅ Calcular profundidad real del agua (desde el centro del personaje)
+        float waterDepth = waterSurfaceY - transform.position.y;
+        bool isDeepEnoughToSwim = waterDepth >= waterSurfaceOffset;
 
-    // Aplicar gravedad
-    velocity.y += gravity * Time.deltaTime;
-    velocity.y = Mathf.Max(velocity.y, terminalVelocity);
-
-    // Comprobar si toca suelo
-    if (controller.isGrounded)
-    {
-        lastGroundedTimeStamp = Time.time;
-
-        // 🔹 Restablecer salto al aterrizar
-        if (!canJump)
+        if (isDeepEnoughToSwim)
         {
-            canJump = true;
+            // 🏊 AGUA PROFUNDA - ACTIVAR NATACIÓN
+
+            // ✅ FLOTACIÓN - aplicar fuerza hacia arriba
+            velocity.y += buoyancyForce * Time.deltaTime;
+
+            // Limitar velocidad vertical en agua
+            velocity.y = Mathf.Clamp(velocity.y, -2f, 2f);
+
+            // Aplicar resistencia del agua (drag)
+            velocity *= waterDrag;
+
+            // Determinar si está nadando (moviéndose)
+            isSwimming = inputVector.magnitude > 0.1f;
+
+            // No resetear hasJumped en agua (a menos que se permita saltar desde agua)
+            if (canJumpFromWater)
+            {
+                canJump = true;
+                hasJumped = false;
+            }
+        }
+        else
+        {
+            // 🚶 AGUA POCO PROFUNDA - CAMINAR NORMALMENTE
+
+            isSwimming = false;
+
+            // Aplicar física normal como en tierra
+            if (controller.isGrounded && velocity.y < 0f)
+            {
+                velocity.y = -2f;
+            }
+
+            // Aplicar gravedad normal
+            velocity.y += gravity * Time.deltaTime;
+            velocity.y = Mathf.Max(velocity.y, terminalVelocity);
+
+            // Aplicar fuerza adicional si está en pendiente
+            if (isOnSlope && controller.isGrounded)
+            {
+                velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+            }
+        }
+    }
+    else
+    {
+        // 🏃 MOVIMIENTO NORMAL (FUERA DEL AGUA)
+
+        // Mantener pegado al suelo (evita saltos falsos cuando ya está en tierra)
+        if (controller.isGrounded && velocity.y < 0f)
+        {
+            velocity.y = -2f;
         }
 
-        // 🔹 Resetear estado si venía de un salto
-        if (hasJumped)
-        {
-            hasJumped = false;
-        }
-    }
+        // Aplicar gravedad
+        velocity.y += gravity * Time.deltaTime;
+        velocity.y = Mathf.Max(velocity.y, terminalVelocity);
 
-    // Aplicar fuerza adicional si está en pendiente
-    if (isOnSlope && controller.isGrounded)
-    {
-        velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+        // Aplicar fuerza adicional si está en pendiente
+        if (isOnSlope && controller.isGrounded)
+        {
+            velocity += Vector3.down * slopeForceDown * Time.deltaTime;
+        }
+
+        isSwimming = false;
     }
 
     // Combinar movimiento horizontal y vertical
@@ -549,20 +833,15 @@ void ApplyMovement()
     // Aplicar movimiento
     controller.Move(finalMove * Time.deltaTime);
 
-    // Guardar tiempo del último grounded
-    if (controller.isGrounded)
+    // ✅ ACTUALIZAR ESTADO DE SUELO DESPUÉS DEL MOVIMIENTO
+    if (controller.isGrounded && !isSwimming)
     {
         lastGroundedTime = Time.time;
-    }
 
-    // 🔹 Jump buffer (si presionó salto antes de tocar suelo)
-    if (jumpBufferTimerLocal > 0f)
-    {
-        jumpBufferTimerLocal -= Time.deltaTime;
-        if ((controller.isGrounded || Time.time - lastGroundedTimeStamp <= coyoteTime) && canJump && !isAttacking)
+        // 🔹 Resetear hasJumped cuando aterriza
+        if (hasJumped)
         {
-            DoJump();
-            jumpBufferTimerLocal = 0f;
+            hasJumped = false;
         }
     }
 }
@@ -615,18 +894,43 @@ void ApplyMovement()
                 Time.deltaTime * terrainAlignmentSpeed);
         }
     }
-    
+
+    // 🌊 Resetear rotación a horizontal al nadar
+    void ResetRotationToHorizontal()
+    {
+        // Crear rotación horizontal (pitch=0, roll=0, mantener yaw)
+        Vector3 targetEuler = transform.eulerAngles;
+        targetEuler.x = 0f;  // Sin pitch (inclinación adelante/atrás)
+        targetEuler.z = 0f;  // Sin roll (inclinación lateral)
+
+        // Suavizar la transición a horizontal
+        Quaternion targetRotation = Quaternion.Euler(targetEuler);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation,
+            Time.deltaTime * terrainAlignmentSpeed);
+
+        // También resetear smoothNormal para que cuando salga del agua no tenga valores residuales
+        smoothNormal = Vector3.Lerp(smoothNormal, Vector3.up, Time.deltaTime * terrainAlignmentSpeed);
+    }
+
 void UpdateAnimations()
 {
     if (animator == null) return;
 
-    // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo)
-    float normalizedSpeed = currentSpeed / runSpeed;
+    // 🌊 PARÁMETROS DE NATACIÓN
+    animator.SetBool("IsInWater", isInWater);
+    animator.SetBool("IsSwimming", isSwimming);
+
+    // 😴 PARÁMETROS DE SUEÑO
+    animator.SetBool("IsSleeping", isSleeping);
+    animator.SetInteger("SleepState", (int)currentSleepState);
+
+    // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
+    float normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
     animator.SetFloat("Speed", normalizedSpeed);
 
     // 🔹 2. Estados principales
-    animator.SetBool("IsGrounded", controller.isGrounded);
-    animator.SetBool("IsRunning", isRunning);
+    animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
+    animator.SetBool("IsRunning", isRunning && !isInWater);
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
 
@@ -805,10 +1109,13 @@ void UpdateAnimations()
     public void TryAttack()
     {
 		if (isCalling) return;
-        bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir) 
-                           && attackCooldownTimer <= 0f 
+		if (isSleeping) return; // 😴 No atacar mientras duerme
+
+        // ✅ Usar variable unificada lastGroundedTime
+        bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir)
+                           && attackCooldownTimer <= 0f
                            && !isAttacking;
-        
+
         if (canAttackNow)
         {
             ExecuteAttack();
@@ -901,17 +1208,21 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
-		// Guardar input de salto (jump buffer)
-		jumpBufferTimerLocal = jumpBufferTime;
+		if (isSleeping) return; // 😴 No saltar mientras duerme
 
-		// Si ya estamos atacando o no podemos saltar, simplemente retornamos (el buffer guardará el intento)
-		if (isAttacking || !canJump) return;
+		// ✅ FIX: Usar lastGroundedTime con tolerancia para evitar timing issues
+		// El botón ya está deshabilitado correctamente en la UI
+		bool isGroundedRecently = (Time.time - lastGroundedTime) <= 0.2f;
 
-		// Si estamos en ground o dentro del coyote time, ejecutar salto ahora
-		if (controller.isGrounded || Time.time - lastGroundedTimeStamp <= coyoteTime)
+		if (!isGroundedRecently && !controller.isGrounded)
 		{
-			DoJump();
+			return;
 		}
+		if (!canJump) return;
+		if (isAttacking) return;
+
+		// Ejecutar salto
+		DoJump();
 	}
 	
 private void DoJump()
@@ -932,23 +1243,110 @@ private void DoJump()
     PlayJumpSound();
 }
 
+// 😴 SISTEMA DE SUEÑO
+public void ToggleSleep()
+{
+    // No permitir dormir si está en agua, atacando, saltando o en el aire
+    if (isInWater || isAttacking || !controller.isGrounded)
+        return;
+
+    // Cambiar estado de sueño
+    switch (currentSleepState)
+    {
+        case SleepState.Awake:
+            // Iniciar transición a dormir
+            currentSleepState = SleepState.EnteringSleep;
+            currentState = MovementState.SleepEnter;
+            sleepStateTimer = sleepEnterDuration;
+            isSleeping = true;
+
+            if (animator != null)
+            {
+                animator.SetTrigger("SleepEnter");
+                animator.SetBool("IsSleeping", true);
+            }
+
+            Debug.Log("😴 Entrando a dormir...");
+            break;
+
+        case SleepState.Sleeping:
+            // Despertar
+            currentSleepState = SleepState.ExitingSleep;
+            currentState = MovementState.SleepExit;
+            sleepStateTimer = sleepExitDuration;
+
+            if (animator != null)
+            {
+                animator.SetTrigger("SleepExit");
+            }
+
+            Debug.Log("🌅 Despertando...");
+            break;
+
+        // No hacer nada si está en transición
+        case SleepState.EnteringSleep:
+        case SleepState.ExitingSleep:
+            break;
+    }
+}
+
+private void UpdateSleepSystem()
+{
+    if (currentSleepState == SleepState.Awake)
+        return;
+
+    // Actualizar timer de transición
+    if (sleepStateTimer > 0f)
+    {
+        sleepStateTimer -= Time.deltaTime;
+
+        if (sleepStateTimer <= 0f)
+        {
+            // Transición completada
+            switch (currentSleepState)
+            {
+                case SleepState.EnteringSleep:
+                    // Transición completa, ahora está completamente dormido
+                    currentSleepState = SleepState.Sleeping;
+                    currentState = MovementState.Sleeping;
+                    Debug.Log("💤 Durmiendo profundamente...");
+                    break;
+
+                case SleepState.ExitingSleep:
+                    // Transición completa, ahora está despierto
+                    currentSleepState = SleepState.Awake;
+                    isSleeping = false;
+
+                    if (animator != null)
+                    {
+                        animator.SetBool("IsSleeping", false);
+                    }
+
+                    Debug.Log("✅ Completamente despierto!");
+                    break;
+            }
+        }
+    }
+}
 
 
-    
+
 void UpdateTimers()
 {
-    // Control del cooldown de salto
-    if (!canJump)
+    // ✅ Control del cooldown de salto - SIMPLIFICADO
+    if (jumpCooldownTimer > 0f)
     {
         jumpCooldownTimer -= Time.deltaTime;
+
+        // Cuando el cooldown termina, permitir saltar de nuevo
         if (jumpCooldownTimer <= 0f)
         {
-            // No habilitamos canJump aquí — se reactiva automáticamente al aterrizar
             jumpCooldownTimer = 0f;
+            canJump = true;  // ✅ Resetear aquí cuando el cooldown termine
         }
     }
 
-    // Control del cooldown del ataque (mantener el tuyo original)
+    // Control del cooldown del ataque
     if (attackCooldownTimer > 0f)
     {
         attackCooldownTimer -= Time.deltaTime;
@@ -968,7 +1366,27 @@ void UpdateTimers()
     
     void UpdateState()
     {
-        if (isAttacking)
+        // 😴 Estados de sueño tienen máxima prioridad
+        if (isSleeping)
+        {
+            // El estado ya está configurado en ToggleSleep() y UpdateSleepSystem()
+            // No cambiar el estado mientras está durmiendo
+            return;
+        }
+
+        // 🌊 Estados de natación tienen prioridad
+        if (isInWater)
+        {
+            if (isSwimming && currentSpeed > movementThreshold)
+            {
+                currentState = MovementState.Swimming;
+            }
+            else
+            {
+                currentState = MovementState.IdleSwim;
+            }
+        }
+        else if (isAttacking)
         {
             currentState = MovementState.Attacking;
         }
@@ -994,7 +1412,19 @@ void UpdateTimers()
             colors.normalColor = isRunning ? Color.green : Color.white;
             runButton.colors = colors;
         }
-        
+
+        // ✅ DESHABILITAR BOTÓN DE SALTO cuando no se puede usar
+        if (jumpButton != null)
+        {
+            bool canJumpNow = controller.isGrounded && canJump && !isAttacking;
+            jumpButton.interactable = canJumpNow;
+
+            // Cambiar color visual para feedback
+            ColorBlock colors = jumpButton.colors;
+            colors.normalColor = canJumpNow ? Color.white : Color.gray;
+            jumpButton.colors = colors;
+        }
+
         if (attackButton != null)
         {
             ColorBlock colors = attackButton.colors;
@@ -1008,6 +1438,40 @@ void UpdateTimers()
                 colors.normalColor = Color.white;
             attackButton.colors = colors;
         }
+
+        // 😴 Sleep button UI
+        if (sleepButton != null)
+        {
+            // Deshabilitar si está en agua, atacando o en el aire
+            bool canSleep = !isInWater && !isAttacking && controller.isGrounded;
+            sleepButton.interactable = canSleep;
+
+            ColorBlock colors = sleepButton.colors;
+
+            // Cambiar color según el estado
+            if (currentSleepState == SleepState.Sleeping)
+            {
+                colors.normalColor = Color.cyan; // Azul cuando está durmiendo
+            }
+            else if (currentSleepState == SleepState.EnteringSleep)
+            {
+                colors.normalColor = Color.blue; // Azul oscuro cuando está entrando a dormir
+            }
+            else if (currentSleepState == SleepState.ExitingSleep)
+            {
+                colors.normalColor = Color.yellow; // Amarillo cuando está despertando
+            }
+            else if (canSleep)
+            {
+                colors.normalColor = Color.white; // Blanco cuando puede dormir
+            }
+            else
+            {
+                colors.normalColor = Color.gray; // Gris cuando no puede dormir
+            }
+
+            sleepButton.colors = colors;
+        }
     }
     
     // Métodos de audio
@@ -1015,6 +1479,7 @@ void UpdateTimers()
 	{
 		// Si ya está rugiendo o atacando, no permitir otro rugido
 		if (isCalling || isAttacking) return;
+		if (isSleeping) return; // 😴 No rugir mientras duerme
 
 		// Activar rugido
 		isCalling = true;
@@ -1150,6 +1615,94 @@ void UpdateTimers()
                                transform.position + Vector3.up * 0.7f + targetMoveDirection * 2f);
             }
         }
+
+        // 🌊 Gizmos de agua
+        if (Application.isPlaying && isInWater && waterCollider != null)
+        {
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireSphere(transform.position, 1f);
+
+            // Línea de superficie del agua
+            Gizmos.color = Color.blue;
+            Vector3 surfacePos = new Vector3(transform.position.x, waterSurfaceY, transform.position.z);
+            Gizmos.DrawLine(surfacePos + Vector3.left * 2f, surfacePos + Vector3.right * 2f);
+            Gizmos.DrawLine(surfacePos + Vector3.forward * 2f, surfacePos + Vector3.back * 2f);
+        }
+    }
+
+    // 🌊 SISTEMA DE DETECCIÓN DE AGUA
+    void OnTriggerEnter(Collider other)
+    {
+        // Verificar si el collider está en el layer de agua
+        if (((1 << other.gameObject.layer) & waterLayer) != 0)
+        {
+            // Guardar referencia al collider del agua
+            waterCollider = other;
+            UpdateWaterSurface(other);
+
+            // ✅ NO activar isInWater inmediatamente, esperar a verificar profundidad
+            Debug.Log("🌊 Dinosaurio tocó el agua (verificando profundidad...)");
+        }
+    }
+
+    void OnTriggerStay(Collider other)
+    {
+        // Verificar si el collider está en el layer de agua
+        if (((1 << other.gameObject.layer) & waterLayer) != 0)
+        {
+            // Actualizar altura de superficie del agua
+            UpdateWaterSurface(other);
+
+            // ✅ Calcular profundidad del agua
+            float waterDepth = waterSurfaceY - transform.position.y;
+
+            // 🔄 HISTÉRESIS: Usar diferentes umbrales para entrar/salir
+            // Esto evita el parpadeo cuando el dinosaurio flota
+            float enterThreshold = waterSurfaceOffset;
+            float exitThreshold = waterSurfaceOffset * waterHysteresis;
+
+            // ✅ Solo activar isInWater si está lo suficientemente profundo
+            if (!isInWater && waterDepth >= enterThreshold)
+            {
+                // Entró a agua profunda
+                isInWater = true;
+                wasInWater = true;
+                Debug.Log($"🏊 Agua profunda detectada! (profundidad: {waterDepth:F2}m, umbral: {enterThreshold:F2}m)");
+            }
+            // ✅ Solo desactivar si la profundidad baja significativamente (histéresis)
+            else if (isInWater && waterDepth < exitThreshold)
+            {
+                // Salió a agua poco profunda (con tolerancia)
+                isInWater = false;
+                isSwimming = false;
+                Debug.Log($"🚶 Agua poco profunda (profundidad: {waterDepth:F2}m, umbral salida: {exitThreshold:F2}m)");
+            }
+        }
+    }
+
+    void OnTriggerExit(Collider other)
+    {
+        // Verificar si el collider está en el layer de agua
+        if (((1 << other.gameObject.layer) & waterLayer) != 0)
+        {
+            ExitWater();
+        }
+    }
+
+    void UpdateWaterSurface(Collider water)
+    {
+        // Calcular la superficie del agua (parte superior del collider)
+        Bounds bounds = water.bounds;
+        waterSurfaceY = bounds.max.y;
+    }
+
+    void ExitWater()
+    {
+        isInWater = false;
+        isSwimming = false;
+        waterCollider = null;
+
+        Debug.Log("🏖️ Dinosaurio salió del agua!");
     }
 }
 
