@@ -916,13 +916,30 @@ void UpdateAnimations()
 {
     if (animator == null) return;
 
+    // 😴 PARÁMETROS DE SUEÑO - Establecer primero
+    animator.SetBool("IsSleeping", isSleeping);
+    animator.SetInteger("SleepState", (int)currentSleepState);
+
+    // 😴 Si está durmiendo, resetear todos los parámetros de movimiento y salir
+    if (isSleeping)
+    {
+        animator.SetFloat("Speed", 0f);
+        animator.SetBool("IsGrounded", true);
+        animator.SetBool("IsRunning", false);
+        animator.SetBool("IsAttacking", false);
+        animator.SetFloat("VerticalSpeed", 0f);
+        animator.SetFloat("MoveX", 0f);
+        animator.SetFloat("MoveZ", 0f);
+        animator.SetFloat("Turn", 0f);
+        animator.SetFloat("Look", 0f);
+        animator.SetBool("IsInWater", false);
+        animator.SetBool("IsSwimming", false);
+        return; // No actualizar más parámetros mientras duerme
+    }
+
     // 🌊 PARÁMETROS DE NATACIÓN
     animator.SetBool("IsInWater", isInWater);
     animator.SetBool("IsSwimming", isSwimming);
-
-    // 😴 PARÁMETROS DE SUEÑO
-    animator.SetBool("IsSleeping", isSleeping);
-    animator.SetInteger("SleepState", (int)currentSleepState);
 
     // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
     float normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
