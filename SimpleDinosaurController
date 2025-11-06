@@ -36,7 +36,7 @@ public class SimpleDinosaurController : MonoBehaviour
         Small,      // 1-2m (Compsognathus, Velociraptor joven)
         Medium,     // 3-5m (Velociraptor, Dilophosaurus)
         Large,      // 6-10m (T-Rex, Spinosaurus)
-        Custom      // Valores manuales
+        Custom      // Valores manuales 
     }
 
     [Header("Velocidades")]
