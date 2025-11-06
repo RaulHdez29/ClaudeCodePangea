@@ -174,6 +174,9 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("Suavizado del movimiento")]
     [Range(1f, 20f)]
     public float movementSmoothness = 10f;
+    [Tooltip("Suavizado de los parámetros de animación MoveX/MoveZ")]
+    [Range(0.05f, 1f)]
+    public float animationDampTime = 0.15f;
     
     [Header("Audio")]
     public AudioClip[] walkSounds;
@@ -934,18 +937,20 @@ void UpdateAnimations()
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
 
-    // 🔹 3. Parámetros de dirección (si los usas en tu blend tree)
+    // 🔹 3. Parámetros de dirección con SUAVIZADO (FIX para transición natural)
+    float targetMoveX = 0f;
+    float targetMoveZ = 0f;
+
     if (inputVector.magnitude > 0.1f)
     {
         Vector3 localMove = transform.InverseTransformDirection(currentMoveDirection);
-        animator.SetFloat("MoveX", localMove.x);
-        animator.SetFloat("MoveZ", localMove.z);
+        targetMoveX = localMove.x;
+        targetMoveZ = localMove.z;
     }
-    else
-    {
-        animator.SetFloat("MoveX", 0f);
-        animator.SetFloat("MoveZ", 0f);
-    }
+
+    // ✅ Usar dampTime para suavizar la transición a idle
+    animator.SetFloat("MoveX", targetMoveX, animationDampTime, Time.deltaTime);
+    animator.SetFloat("MoveZ", targetMoveZ, animationDampTime, Time.deltaTime);
 
     // 🔹 4. Parámetros de cámara / mirada
     animator.SetFloat("Turn", currentTurn);
