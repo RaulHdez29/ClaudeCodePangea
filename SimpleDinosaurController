@@ -1273,6 +1273,7 @@ public void ToggleSleep()
     Debug.Log("🔵 ToggleSleep() llamado!");
     Debug.Log($"🔍 Estado actual - isInWater: {isInWater}, isAttacking: {isAttacking}, isGrounded: {controller.isGrounded}");
     Debug.Log($"🔍 currentSleepState: {currentSleepState}, isSleeping: {isSleeping}");
+    Debug.Log($"🔍 lastGroundedTime: {lastGroundedTime}, Time.time: {Time.time}, diferencia: {Time.time - lastGroundedTime}");
 
     // No permitir dormir si está en agua, atacando, saltando o en el aire
     if (isInWater)
@@ -1287,9 +1288,25 @@ public void ToggleSleep()
         return;
     }
 
-    if (!controller.isGrounded)
+    // ✅ Detección mejorada de suelo con múltiples métodos
+    bool isGroundedByController = controller.isGrounded;
+
+    // Método 1: Tolerancia de tiempo (como el sistema de salto)
+    float timeSinceGrounded = Time.time - lastGroundedTime;
+    bool isGroundedRecently = timeSinceGrounded <= 0.2f;
+
+    // Método 2: Raycast manual como backup
+    Vector3 rayOrigin = transform.position + Vector3.up * 0.1f;
+    bool isGroundedByRaycast = Physics.Raycast(rayOrigin, Vector3.down, 0.5f);
+
+    // Combinar todos los métodos
+    bool isEffectivelyGrounded = isGroundedByController || isGroundedRecently || isGroundedByRaycast;
+
+    Debug.Log($"🔍 Detección de suelo - Controller: {isGroundedByController}, Recently: {isGroundedRecently} ({timeSinceGrounded:F2}s), Raycast: {isGroundedByRaycast}");
+
+    if (!isEffectivelyGrounded)
     {
-        Debug.LogWarning("❌ No puede dormir: no está en el suelo");
+        Debug.LogWarning($"❌ No puede dormir: no está en el suelo por ningún método");
         return;
     }
 
