@@ -128,7 +128,34 @@ public class SimpleDinosaurController : MonoBehaviour
 	public float callDuration = 2.5f; // ajusta según la duración de tu animación
 	private bool isCalling = false;
 	private float callTimer = 0f;
-    
+
+	[Header("😴 SISTEMA DE DORMIR")]
+	[Tooltip("Botón para activar/desactivar modo dormir")]
+	public Button sleepButton;
+	[Tooltip("¿Está durmiendo actualmente?")]
+	public bool isSleeping = false;
+	[Tooltip("Tiempo que tarda en dormirse (segundos)")]
+	public float sleepTransitionTime = 1.5f;
+	private float sleepTransitionTimer = 0f;
+
+	[Header("🔍 DETECCIÓN DE SUELO MEJORADA")]
+	[Tooltip("Usar detección de suelo personalizada (más confiable que CharacterController.isGrounded)")]
+	public bool useCustomGroundDetection = true;
+	[Tooltip("Distancia del raycast para detectar suelo")]
+	public float groundCheckDistance = 0.3f;
+	[Tooltip("Radio del spherecast para detectar suelo")]
+	public float groundCheckRadius = 0.3f;
+	[Tooltip("Offset desde el centro del personaje para el ground check")]
+	public float groundCheckOffset = 0.1f;
+	[Tooltip("Layer del suelo")]
+	public LayerMask groundLayer = -1; // -1 = todo
+	[Tooltip("Mostrar gizmos de detección de suelo")]
+	public bool showGroundCheckGizmos = true;
+
+	// Variables privadas para ground detection
+	private bool isGroundedCustom = false;
+	private RaycastHit groundHit;
+
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
     public bool enableStaticTurn = true;
@@ -298,46 +325,63 @@ public class SimpleDinosaurController : MonoBehaviour
             attackButton.onClick.RemoveAllListeners();
             attackButton.onClick.AddListener(TryAttack);
         }
+
+		if (sleepButton != null)
+		{
+			sleepButton.onClick.RemoveAllListeners();
+			sleepButton.onClick.AddListener(ToggleSleep);
+		}
     }
     
     void Update()
     {
+		// Detección de suelo mejorada (PRIMERO - antes de todo)
+		CustomGroundCheck();
+
+		// Sistema de dormir - si está durmiendo, solo actualizar animación de dormir
+		if (isSleeping)
+		{
+			UpdateSleepSystem();
+			UpdateAnimations(); // Solo para mantener animación de dormir
+			return; // No procesar movimiento ni ataques
+		}
+
         // Leer input del joystick
         GetInput();
-        
+
         // Detectar pendientes
         CheckSlope();
-        
+
         // Calcular movimiento y rotación
         CalculateMovement();
-        
+
         // ⭐ FIX: Aplicar rotación separada
         ApplySeparatedRotation();
-        
+
         // Aplicar movimiento
         ApplyMovement();
-        
+
         // ⭐ Alinear con el terreno (solo afecta pitch/roll, no yaw)
         if (alignToTerrain && controller.isGrounded)
         {
             AlignToTerrainFixed();
         }
-        
+
         // Actualizar animaciones
         UpdateAnimations();
-        
+
         // Actualizar sistema de ataque
         UpdateAttackSystem();
-        
+
         // Actualizar Turn y Look basado en cámara
         UpdateCameraBasedTurnAndLook();
-        
+
         // Actualizar timers
         UpdateTimers();
-        
+
         // Actualizar estado
         UpdateState();
-        
+
         // Actualizar UI
         UpdateUI();
     }
@@ -383,6 +427,66 @@ public class SimpleDinosaurController : MonoBehaviour
             slopeNormal = Vector3.up;
         }
     }
+
+	/// <summary>
+	/// Detección de suelo mejorada usando SphereCast - Más confiable que CharacterController.isGrounded
+	/// </summary>
+	void CustomGroundCheck()
+	{
+		if (!useCustomGroundDetection)
+		{
+			isGroundedCustom = controller.isGrounded;
+			return;
+		}
+
+		// Punto de origen para el check (ligeramente arriba del suelo del CharacterController)
+		Vector3 sphereOrigin = transform.position + Vector3.up * (groundCheckOffset + groundCheckRadius);
+
+		// SphereCast hacia abajo
+		bool hitGround = Physics.SphereCast(
+			sphereOrigin,
+			groundCheckRadius,
+			Vector3.down,
+			out groundHit,
+			groundCheckDistance,
+			groundLayer,
+			QueryTriggerInteraction.Ignore
+		);
+
+		// También verificar con un raycast simple como backup
+		bool rayHitGround = Physics.Raycast(
+			transform.position + Vector3.up * groundCheckOffset,
+			Vector3.down,
+			groundCheckDistance + groundCheckRadius,
+			groundLayer,
+			QueryTriggerInteraction.Ignore
+		);
+
+		// Considerar en el suelo si cualquiera de los dos métodos detecta suelo
+		isGroundedCustom = hitGround || rayHitGround;
+
+		// Debug log cuando hay discrepancia
+		if (isGroundedCustom != controller.isGrounded)
+		{
+			Debug.Log($"[Ground Detection] CharacterController.isGrounded: {controller.isGrounded}, CustomGroundCheck: {isGroundedCustom}");
+		}
+	}
+
+	/// <summary>
+	/// Propiedad que devuelve el estado de grounded más confiable
+	/// </summary>
+	public bool IsGrounded
+	{
+		get
+		{
+			if (useCustomGroundDetection)
+			{
+				// Usar detección personalizada O la del controller (cualquiera que sea true)
+				return isGroundedCustom || controller.isGrounded;
+			}
+			return controller.isGrounded;
+		}
+	}
     
     void CalculateMovement()
     {
@@ -994,7 +1098,7 @@ void UpdateTimers()
             colors.normalColor = isRunning ? Color.green : Color.white;
             runButton.colors = colors;
         }
-        
+
         if (attackButton != null)
         {
             ColorBlock colors = attackButton.colors;
@@ -1008,7 +1112,97 @@ void UpdateTimers()
                 colors.normalColor = Color.white;
             attackButton.colors = colors;
         }
+
+		if (sleepButton != null)
+		{
+			ColorBlock colors = sleepButton.colors;
+			colors.normalColor = isSleeping ? Color.blue : Color.white;
+			sleepButton.colors = colors;
+		}
     }
+
+	// ========== SISTEMA DE DORMIR ==========
+
+	/// <summary>
+	/// Actualiza el sistema de dormir (transiciones)
+	/// </summary>
+	void UpdateSleepSystem()
+	{
+		if (isSleeping)
+		{
+			// Contador de transición
+			if (sleepTransitionTimer < sleepTransitionTime)
+			{
+				sleepTransitionTimer += Time.deltaTime;
+			}
+
+			// Aplicar gravedad para mantener en el suelo
+			if (!IsGrounded)
+			{
+				velocity.y += gravity * Time.deltaTime;
+				controller.Move(velocity * Time.deltaTime);
+			}
+			else
+			{
+				velocity.y = -2f; // Mantener pegado al suelo
+			}
+		}
+	}
+
+	/// <summary>
+	/// Activa/desactiva el modo dormir
+	/// </summary>
+	public void ToggleSleep()
+	{
+		// Solo puede dormir si está en el suelo
+		if (!isSleeping && !IsGrounded)
+		{
+			Debug.Log($"❌ No puede dormir en el aire!\n" +
+					  $"   - CharacterController.isGrounded: {controller.isGrounded}\n" +
+					  $"   - CustomGroundCheck.isGroundedCustom: {isGroundedCustom}\n" +
+					  $"   - IsGrounded (combinado): {IsGrounded}");
+			return;
+		}
+
+		isSleeping = !isSleeping;
+		sleepTransitionTimer = 0f;
+
+		if (isSleeping)
+		{
+			Debug.Log($"😴 Dinosaurio durmiendo...\n" +
+					  $"   - CharacterController.isGrounded: {controller.isGrounded}\n" +
+					  $"   - CustomGroundCheck.isGroundedCustom: {isGroundedCustom}\n" +
+					  $"   - IsGrounded (combinado): {IsGrounded}");
+
+			// Detener movimiento
+			currentSpeed = 0f;
+			targetSpeed = 0f;
+			velocity = Vector3.zero;
+			moveDirection = Vector3.zero;
+
+			// Cancelar estados
+			isRunning = false;
+			isAttacking = false;
+			isCalling = false;
+
+			// Activar animación de dormir
+			if (animator != null)
+			{
+				animator.SetBool("IsSleeping", true);
+				animator.SetFloat("Speed", 0f);
+			}
+		}
+		else
+		{
+			Debug.Log("🌞 Dinosaurio despertando...");
+
+			// Desactivar animación de dormir
+			if (animator != null)
+			{
+				animator.SetBool("IsSleeping", false);
+			}
+		}
+	}
     
     // Métodos de audio
 	void PlayCallSound()
@@ -1090,63 +1284,105 @@ void UpdateTimers()
     void OnDrawGizmosSelected()
     {
         if (!showAttackGizmos) return;
-        
+
         Vector3 attackPosition = attackPoint != null ? attackPoint.position : transform.position + transform.forward * 1f;
-        
+
         // Gizmos de ataque
         Gizmos.color = isAttacking ? Color.red : (enemiesInRange > 0 ? Color.yellow : Color.cyan);
         Gizmos.DrawWireSphere(attackPosition, attackRange);
-        
+
         if (Application.isPlaying)
         {
             Gizmos.color = Color.red;
             Vector3 forward = transform.forward;
             Vector3 right = Quaternion.Euler(0, attackAngle / 2f, 0) * forward;
             Vector3 left = Quaternion.Euler(0, -attackAngle / 2f, 0) * forward;
-            
+
             Gizmos.DrawLine(transform.position, transform.position + right * attackRange);
             Gizmos.DrawLine(transform.position, transform.position + left * attackRange);
         }
-        
-        // Gizmos de ground detection
+
+        // ========== GIZMOS DE DETECCIÓN DE SUELO MEJORADA ==========
+        if (Application.isPlaying && showGroundCheckGizmos && useCustomGroundDetection)
+        {
+			// SphereCast origin y trayectoria
+			Vector3 sphereOrigin = transform.position + Vector3.up * (groundCheckOffset + groundCheckRadius);
+			Vector3 sphereEnd = sphereOrigin + Vector3.down * groundCheckDistance;
+
+			// Color según detección
+			Color groundColor = isGroundedCustom ? Color.green : Color.red;
+
+			// Dibujar esfera en origen
+			Gizmos.color = groundColor;
+			Gizmos.DrawWireSphere(sphereOrigin, groundCheckRadius);
+
+			// Dibujar esfera en destino
+			Gizmos.color = groundColor * 0.5f;
+			Gizmos.DrawWireSphere(sphereEnd, groundCheckRadius);
+
+			// Línea conectando
+			Gizmos.color = groundColor;
+			Gizmos.DrawLine(sphereOrigin, sphereEnd);
+
+			// Raycast de backup
+			Vector3 rayOrigin = transform.position + Vector3.up * groundCheckOffset;
+			Vector3 rayEnd = rayOrigin + Vector3.down * (groundCheckDistance + groundCheckRadius);
+			Gizmos.color = Color.cyan;
+			Gizmos.DrawLine(rayOrigin, rayEnd);
+
+			// Mostrar comparación con CharacterController.isGrounded
+			if (controller != null)
+			{
+				Vector3 labelPos = transform.position + Vector3.up * 2f;
+
+				// Visualizar diferencias
+				if (isGroundedCustom != controller.isGrounded)
+				{
+					Gizmos.color = Color.yellow;
+					Gizmos.DrawWireSphere(transform.position, 0.5f);
+				}
+			}
+        }
+
+        // Gizmos de ground detection original (CharacterController)
         if (Application.isPlaying)
         {
             Vector3 rayStart = transform.position + Vector3.up * 0.5f;
             Gizmos.color = controller != null && controller.isGrounded ? Color.green : Color.red;
             Gizmos.DrawLine(rayStart, rayStart + Vector3.down * 2f);
-            
+
             if (isOnSlope)
             {
                 Gizmos.color = Color.yellow;
                 Gizmos.DrawLine(slopeHit.point, slopeHit.point + slopeHit.normal * 2f);
             }
-            
+
             // Gizmos de alineación con terreno
             if (alignToTerrain)
             {
                 // Mostrar normal suavizada del terreno
                 Gizmos.color = Color.magenta;
                 Gizmos.DrawLine(transform.position, transform.position + smoothNormal * 3f);
-                
+
                 // Mostrar up vector del transform
                 Gizmos.color = Color.cyan;
                 Gizmos.DrawLine(transform.position, transform.position + transform.up * 2.5f);
             }
         }
-        
+
         // Gizmos de dirección de movimiento
         if (Application.isPlaying && currentMoveDirection != Vector3.zero)
         {
             // Dirección actual
             Gizmos.color = Color.green;
-            Gizmos.DrawLine(transform.position + Vector3.up * 0.5f, 
+            Gizmos.DrawLine(transform.position + Vector3.up * 0.5f,
                            transform.position + Vector3.up * 0.5f + currentMoveDirection * 2f);
-            
+
             // Dirección objetivo
             if (targetMoveDirection != Vector3.zero)
             {
                 Gizmos.color = Color.yellow;
-                Gizmos.DrawLine(transform.position + Vector3.up * 0.7f, 
+                Gizmos.DrawLine(transform.position + Vector3.up * 0.7f,
                                transform.position + Vector3.up * 0.7f + targetMoveDirection * 2f);
             }
         }
