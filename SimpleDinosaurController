@@ -690,11 +690,17 @@ public class SimpleDinosaurController : MonoBehaviour
         
         // Suavizar velocidad
         currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * movementSmoothness);
-        
+
         // Calcular dirección de movimiento final
         moveDirection = transform.forward * currentSpeed;
 
-        
+        // ⭐ Proyectar movimiento sobre la pendiente para mantener velocidad constante
+        if (isOnSlope && !isInWater)
+        {
+            // Proyectar el vector de movimiento sobre el plano de la pendiente
+            moveDirection = Vector3.ProjectOnPlane(moveDirection, slopeNormal).normalized * currentSpeed;
+        }
+
         // Si no podemos movernos mientras atacamos
         if (isAttacking && !canMoveWhileAttacking)
         {
