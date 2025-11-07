@@ -20,7 +20,6 @@ public class SimpleDinosaurController : MonoBehaviour
     public Button callButton;
     public Button jumpButton;
     public Button attackButton;
-    public Button sleepButton;
 
     [Header("📏 CONFIGURACIÓN DE TAMAÑO DEL DINOSAURIO")]
     [Tooltip("Selecciona el tamaño del dinosaurio para aplicar valores preconfigurados")]
@@ -200,14 +199,6 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("Permitir salto desde el agua")]
     public bool canJumpFromWater = false;
 
-    [Header("😴 SISTEMA DE SUEÑO")]
-    [Tooltip("Duración de la animación de entrar a dormir (segundos)")]
-    public float sleepEnterDuration = 2f;
-    [Tooltip("Duración de la animación de salir del sueño (segundos)")]
-    public float sleepExitDuration = 1.5f;
-    [Tooltip("Mostrar efectos Z al dormir")]
-    public bool showSleepEffects = true;
-
     // Estados
     public enum MovementState
     {
@@ -218,20 +209,9 @@ public class SimpleDinosaurController : MonoBehaviour
         Falling = 4,
         Attacking = 5,
         Swimming = 6,
-        IdleSwim = 7,
-        SleepEnter = 8,
-        Sleeping = 9,
-        SleepExit = 10
+        IdleSwim = 7
     }
 
-    public enum SleepState
-    {
-        Awake,
-        EnteringSleep,
-        Sleeping,
-        ExitingSleep
-    }
-    
     public enum TurnState
     {
         Idle = 0,
@@ -249,11 +229,6 @@ public class SimpleDinosaurController : MonoBehaviour
     public int enemiesInRange = 0;
     public bool isInWater = false;
     public bool isSwimming = false;
-
-    // 😴 Variables de estado de sueño
-    public SleepState currentSleepState = SleepState.Awake;
-    private bool isSleeping = false;
-    private float sleepStateTimer = 0f;
 
     // Character Controller
     private CharacterController controller;
@@ -371,12 +346,6 @@ public class SimpleDinosaurController : MonoBehaviour
         {
             attackButton.onClick.RemoveAllListeners();
             attackButton.onClick.AddListener(TryAttack);
-        }
-
-        if (sleepButton != null)
-        {
-            sleepButton.onClick.RemoveAllListeners();
-            sleepButton.onClick.AddListener(ToggleSleep);
         }
     }
 
@@ -551,9 +520,6 @@ public class SimpleDinosaurController : MonoBehaviour
         // Actualizar Turn y Look basado en cámara
         UpdateCameraBasedTurnAndLook();
 
-        // Actualizar sistema de sueño
-        UpdateSleepSystem();
-
         // Actualizar timers
         UpdateTimers();
 
@@ -566,13 +532,6 @@ public class SimpleDinosaurController : MonoBehaviour
     
     void GetInput()
     {
-        // 😴 No leer input si está durmiendo
-        if (isSleeping)
-        {
-            inputVector = Vector3.zero;
-            return;
-        }
-
         if (movementJoystick != null)
         {
             inputVector = new Vector3(movementJoystick.Horizontal, 0, movementJoystick.Vertical);
@@ -920,10 +879,6 @@ void UpdateAnimations()
     animator.SetBool("IsInWater", isInWater);
     animator.SetBool("IsSwimming", isSwimming);
 
-    // 😴 PARÁMETROS DE SUEÑO
-    animator.SetBool("IsSleeping", isSleeping);
-    animator.SetInteger("SleepState", (int)currentSleepState);
-
     // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
     float normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
     animator.SetFloat("Speed", normalizedSpeed);
@@ -1109,7 +1064,6 @@ void UpdateAnimations()
     public void TryAttack()
     {
 		if (isCalling) return;
-		if (isSleeping) return; // 😴 No atacar mientras duerme
 
         // ✅ Usar variable unificada lastGroundedTime
         bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir)
@@ -1208,8 +1162,6 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
-		if (isSleeping) return; // 😴 No saltar mientras duerme
-
 		// ✅ FIX: Usar lastGroundedTime con tolerancia para evitar timing issues
 		// El botón ya está deshabilitado correctamente en la UI
 		bool isGroundedRecently = (Time.time - lastGroundedTime) <= 0.2f;
@@ -1242,94 +1194,6 @@ private void DoJump()
 
     PlayJumpSound();
 }
-
-// 😴 SISTEMA DE SUEÑO
-public void ToggleSleep()
-{
-    // No permitir dormir si está en agua, atacando, saltando o en el aire
-    if (isInWater || isAttacking || !controller.isGrounded)
-        return;
-
-    // Cambiar estado de sueño
-    switch (currentSleepState)
-    {
-        case SleepState.Awake:
-            // Iniciar transición a dormir
-            currentSleepState = SleepState.EnteringSleep;
-            currentState = MovementState.SleepEnter;
-            sleepStateTimer = sleepEnterDuration;
-            isSleeping = true;
-
-            if (animator != null)
-            {
-                animator.SetTrigger("SleepEnter");
-                animator.SetBool("IsSleeping", true);
-            }
-
-            Debug.Log("😴 Entrando a dormir...");
-            break;
-
-        case SleepState.Sleeping:
-            // Despertar
-            currentSleepState = SleepState.ExitingSleep;
-            currentState = MovementState.SleepExit;
-            sleepStateTimer = sleepExitDuration;
-
-            if (animator != null)
-            {
-                animator.SetTrigger("SleepExit");
-            }
-
-            Debug.Log("🌅 Despertando...");
-            break;
-
-        // No hacer nada si está en transición
-        case SleepState.EnteringSleep:
-        case SleepState.ExitingSleep:
-            break;
-    }
-}
-
-private void UpdateSleepSystem()
-{
-    if (currentSleepState == SleepState.Awake)
-        return;
-
-    // Actualizar timer de transición
-    if (sleepStateTimer > 0f)
-    {
-        sleepStateTimer -= Time.deltaTime;
-
-        if (sleepStateTimer <= 0f)
-        {
-            // Transición completada
-            switch (currentSleepState)
-            {
-                case SleepState.EnteringSleep:
-                    // Transición completa, ahora está completamente dormido
-                    currentSleepState = SleepState.Sleeping;
-                    currentState = MovementState.Sleeping;
-                    Debug.Log("💤 Durmiendo profundamente...");
-                    break;
-
-                case SleepState.ExitingSleep:
-                    // Transición completa, ahora está despierto
-                    currentSleepState = SleepState.Awake;
-                    isSleeping = false;
-
-                    if (animator != null)
-                    {
-                        animator.SetBool("IsSleeping", false);
-                    }
-
-                    Debug.Log("✅ Completamente despierto!");
-                    break;
-            }
-        }
-    }
-}
-
-
 
 void UpdateTimers()
 {
@@ -1366,14 +1230,6 @@ void UpdateTimers()
     
     void UpdateState()
     {
-        // 😴 Estados de sueño tienen máxima prioridad
-        if (isSleeping)
-        {
-            // El estado ya está configurado en ToggleSleep() y UpdateSleepSystem()
-            // No cambiar el estado mientras está durmiendo
-            return;
-        }
-
         // 🌊 Estados de natación tienen prioridad
         if (isInWater)
         {
@@ -1438,40 +1294,6 @@ void UpdateTimers()
                 colors.normalColor = Color.white;
             attackButton.colors = colors;
         }
-
-        // 😴 Sleep button UI
-        if (sleepButton != null)
-        {
-            // Deshabilitar si está en agua, atacando o en el aire
-            bool canSleep = !isInWater && !isAttacking && controller.isGrounded;
-            sleepButton.interactable = canSleep;
-
-            ColorBlock colors = sleepButton.colors;
-
-            // Cambiar color según el estado
-            if (currentSleepState == SleepState.Sleeping)
-            {
-                colors.normalColor = Color.cyan; // Azul cuando está durmiendo
-            }
-            else if (currentSleepState == SleepState.EnteringSleep)
-            {
-                colors.normalColor = Color.blue; // Azul oscuro cuando está entrando a dormir
-            }
-            else if (currentSleepState == SleepState.ExitingSleep)
-            {
-                colors.normalColor = Color.yellow; // Amarillo cuando está despertando
-            }
-            else if (canSleep)
-            {
-                colors.normalColor = Color.white; // Blanco cuando puede dormir
-            }
-            else
-            {
-                colors.normalColor = Color.gray; // Gris cuando no puede dormir
-            }
-
-            sleepButton.colors = colors;
-        }
     }
     
     // Métodos de audio
@@ -1479,7 +1301,6 @@ void UpdateTimers()
 	{
 		// Si ya está rugiendo o atacando, no permitir otro rugido
 		if (isCalling || isAttacking) return;
-		if (isSleeping) return; // 😴 No rugir mientras duerme
 
 		// Activar rugido
 		isCalling = true;
