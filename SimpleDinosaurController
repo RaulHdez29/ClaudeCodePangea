@@ -250,6 +250,7 @@ public class SimpleDinosaurController : MonoBehaviour
     [Header("Audio")]
     public AudioClip[] walkSounds;
     public AudioClip[] runSounds;
+    public AudioClip[] crouchWalkSounds;
     public AudioClip[] callSounds;
     public AudioClip[] jumpSounds;
     public AudioClip[] landSounds;
@@ -407,9 +408,9 @@ public class SimpleDinosaurController : MonoBehaviour
         {
             runButton.onClick.RemoveAllListeners();
             runButton.onClick.AddListener(() => {
-                if (!isCrouching) {
-                    isRunning = !isRunning;
-                }
+                isRunning = !isRunning;
+                // Si activa correr mientras está agachado, se mantiene agachado
+                // hasta que mueva el joystick (lógica en CalculateMovement)
             });
         }
 
@@ -418,9 +419,8 @@ public class SimpleDinosaurController : MonoBehaviour
             crouchButton.onClick.RemoveAllListeners();
             crouchButton.onClick.AddListener(() => {
                 isCrouching = !isCrouching;
-                if (isCrouching) {
-                    isRunning = false; // No se puede correr mientras está agachado
-                }
+                // Ya no desactivamos isRunning aquí
+                // El usuario puede tener run activo y crouch al mismo tiempo
             });
         }
 
@@ -733,25 +733,32 @@ public class SimpleDinosaurController : MonoBehaviour
         // ⭐ FIX: Calcular dirección relativa a la cámara de forma más estable
         if (inputVector.magnitude > turnInPlaceThreshold)
         {
+            // 🏃 Si está agachado y tiene run activo, al mover el joystick sale del crouch
+            if (isCrouching && isRunning && inputVector.magnitude > movementThreshold)
+            {
+                isCrouching = false;
+                Debug.Log("🏃 Saliendo de crouch porque se activó correr con movimiento");
+            }
+
             // Obtener vectores de la cámara
             Vector3 cameraForward = cameraTransform.forward;
             Vector3 cameraRight = cameraTransform.right;
-            
+
             // Proyectar en plano horizontal
             cameraForward.y = 0;
             cameraRight.y = 0;
             cameraForward.Normalize();
             cameraRight.Normalize();
-            
+
             // Calcular dirección deseada basada en el input del joystick
             targetMoveDirection = (cameraForward * inputVector.z + cameraRight * inputVector.x).normalized;
-            
+
             // Si estamos atacando y no podemos movernos, mantener dirección actual
             if (isAttacking && !canMoveWhileAttacking)
             {
                 targetMoveDirection = transform.forward;
             }
-            
+
             // Suavizar la dirección de movimiento
             if (currentMoveDirection == Vector3.zero)
             {
@@ -759,7 +766,7 @@ public class SimpleDinosaurController : MonoBehaviour
             }
             else
             {
-                currentMoveDirection = Vector3.Slerp(currentMoveDirection, targetMoveDirection, 
+                currentMoveDirection = Vector3.Slerp(currentMoveDirection, targetMoveDirection,
                     Time.deltaTime * turnSmoothness);
             }
             
@@ -1455,8 +1462,8 @@ void UpdateTimers()
             ColorBlock colors = runButton.colors;
             colors.normalColor = isRunning ? Color.green : Color.white;
             runButton.colors = colors;
-            // Deshabilitar botón de correr si está agachado
-            runButton.interactable = !isCrouching;
+            // Ya no deshabilitamos el botón cuando está agachado
+            // El usuario puede activar run mientras está agachado
         }
 
         if (crouchButton != null)
@@ -1563,7 +1570,29 @@ void UpdateTimers()
             }
         }
     }
-    
+
+    // 🔽 Método para pasos en crouch (llamado por eventos de animación de crouch)
+    public void PlayCrouchFootstep()
+    {
+        if (audioSource != null)
+        {
+            if (crouchWalkSounds.Length > 0)
+            {
+                AudioClip clip = crouchWalkSounds[Random.Range(0, crouchWalkSounds.Length)];
+                audioSource.PlayOneShot(clip, 0.6f); // Volumen un poco más bajo que walk
+            }
+            else
+            {
+                // Fallback: si no hay sonidos de crouch, usar walk sounds
+                if (walkSounds.Length > 0)
+                {
+                    AudioClip clip = walkSounds[Random.Range(0, walkSounds.Length)];
+                    audioSource.PlayOneShot(clip, 0.5f);
+                }
+            }
+        }
+    }
+
     public void PlayLandSound()
     {
         if (audioSource != null && landSounds.Length > 0)
