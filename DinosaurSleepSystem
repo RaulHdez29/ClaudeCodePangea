@@ -93,19 +93,25 @@ public class DinosaurSleepSystem : MonoBehaviour
     [Header("🔍 Debug Info (Solo Lectura)")]
     [Tooltip("¿Puede dormir ahora? (debug)")]
     public bool canSleepNow = true;
-    
+
     [Tooltip("¿Está en el agua? (debug)")]
     public bool isInWater = false;
-    
+
     [Tooltip("¿Está nadando? (debug)")]
     public bool isSwimming = false;
-    
+
+    [Tooltip("¿Está comiendo? (debug)")]
+    public bool isEating = false;
+
+    [Tooltip("¿Está bebiendo? (debug)")]
+    public bool isDrinking = false;
+
     [Tooltip("Velocidad actual del dinosaurio (debug)")]
     public float currentSpeed = 0f;
-    
+
     [Tooltip("Input actual del joystick (debug)")]
     public float currentJoystickInput = 0f;
-    
+
     [Tooltip("Tiempo restante de cooldown (debug)")]
     public float cooldownTimeRemaining = 0f;
     
@@ -245,13 +251,15 @@ public class DinosaurSleepSystem : MonoBehaviour
     }
     
     /// <summary>
-    /// Actualiza el estado de agua/natación del dinosaurio
+    /// Actualiza el estado de agua/natación/comida/bebida del dinosaurio
     /// </summary>
     void UpdateSwimmingStatus()
     {
         isInWater = false;
         isSwimming = false;
-        
+        isEating = false;
+        isDrinking = false;
+
         if (dinosaurController != null)
         {
             // ═══════════════════════════════════════════════════════════
@@ -262,7 +270,7 @@ public class DinosaurSleepSystem : MonoBehaviour
             {
                 isInWater = (bool)isInWaterField.GetValue(dinosaurController);
             }
-            
+
             // ═══════════════════════════════════════════════════════════
             // 🌊 DETECCIÓN 2: IsSwimming (está nadando activamente)
             // ═══════════════════════════════════════════════════════════
@@ -271,7 +279,27 @@ public class DinosaurSleepSystem : MonoBehaviour
             {
                 isSwimming = (bool)isSwimmingField.GetValue(dinosaurController);
             }
-            
+
+            // ═══════════════════════════════════════════════════════════
+            // 🍖 DETECCIÓN 3: IsEating (está comiendo)
+            // ═══════════════════════════════════════════════════════════
+            var isEatingField = typeof(SimpleDinosaurController).GetField("isEating",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (isEatingField != null)
+            {
+                isEating = (bool)isEatingField.GetValue(dinosaurController);
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // 💧 DETECCIÓN 4: IsDrinking (está bebiendo)
+            // ═══════════════════════════════════════════════════════════
+            var isDrinkingField = typeof(SimpleDinosaurController).GetField("isDrinking",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (isDrinkingField != null)
+            {
+                isDrinking = (bool)isDrinkingField.GetValue(dinosaurController);
+            }
+
             // ═══════════════════════════════════════════════════════════
             // 🌊 VERIFICACIÓN ADICIONAL: Parámetros del Animator
             // ═══════════════════════════════════════════════════════════
@@ -283,12 +311,26 @@ public class DinosaurSleepSystem : MonoBehaviour
                     bool animatorInWater = animator.GetBool("IsInWater");
                     isInWater = isInWater || animatorInWater;
                 }
-                
+
                 // Verificar IsSwimming en el Animator
                 if (HasParameter("IsSwimming", AnimatorControllerParameterType.Bool))
                 {
                     bool animatorSwimming = animator.GetBool("IsSwimming");
                     isSwimming = isSwimming || animatorSwimming;
+                }
+
+                // Verificar IsEating en el Animator
+                if (HasParameter("IsEating", AnimatorControllerParameterType.Bool))
+                {
+                    bool animatorEating = animator.GetBool("IsEating");
+                    isEating = isEating || animatorEating;
+                }
+
+                // Verificar IsDrinking en el Animator
+                if (HasParameter("IsDrinking", AnimatorControllerParameterType.Bool))
+                {
+                    bool animatorDrinking = animator.GetBool("IsDrinking");
+                    isDrinking = isDrinking || animatorDrinking;
                 }
             }
         }
@@ -325,15 +367,20 @@ public class DinosaurSleepSystem : MonoBehaviour
         bool isSpeedZero = currentSpeed <= stoppedSpeedThreshold;
         bool isJoystickZero = currentJoystickInput <= joystickDeadZone;
         bool isAnimatorSpeedZero = animatorSpeed <= stoppedSpeedThreshold;
-        
+
         // ═══════════════════════════════════════════════════════════
         // 🌊 VALIDACIÓN DE AGUA: NO puede dormir si está en agua O nadando
         // ═══════════════════════════════════════════════════════════
         bool notInWater = !preventSleepWhileSwimming || (!isInWater && !isSwimming);
-        
+
+        // ═══════════════════════════════════════════════════════════
+        // 🍖 VALIDACIÓN DE COMIDA/BEBIDA: NO puede dormir si está comiendo o bebiendo
+        // ═══════════════════════════════════════════════════════════
+        bool notEatingOrDrinking = !isEating && !isDrinking;
+
         bool notInCooldown = !isInCooldown;
-        
-        canSleepNow = isSpeedZero && isJoystickZero && isAnimatorSpeedZero && notInWater && notInCooldown;
+
+        canSleepNow = isSpeedZero && isJoystickZero && isAnimatorSpeedZero && notInWater && notEatingOrDrinking && notInCooldown;
     }
     
     /// <summary>
@@ -363,11 +410,20 @@ public class DinosaurSleepSystem : MonoBehaviour
             if (!canSleepNow)
             {
                 sleepButton.interactable = false;
-                
+
                 ColorBlock colors = sleepButton.colors;
-                
+
+                // 🍖 Diferentes colores según el estado
+                if (isEating)
+                {
+                    colors.disabledColor = new Color(0.6f, 0.3f, 0f, 0.6f); // Marrón (comiendo)
+                }
+                else if (isDrinking)
+                {
+                    colors.disabledColor = new Color(0f, 0.6f, 0.8f, 0.6f); // Cyan oscuro (bebiendo)
+                }
                 // 🌊 Diferentes colores según el estado del agua
-                if (isSwimming)
+                else if (isSwimming)
                 {
                     colors.disabledColor = new Color(0f, 0.4f, 1f, 0.6f); // Azul oscuro (nadando)
                 }
@@ -379,7 +435,7 @@ public class DinosaurSleepSystem : MonoBehaviour
                 {
                     colors.disabledColor = new Color(1f, 1f, 0f, 0.5f); // Amarillo (movimiento)
                 }
-                
+
                 sleepButton.colors = colors;
             }
             else
@@ -556,8 +612,33 @@ public class DinosaurSleepSystem : MonoBehaviour
         
         UpdateMovementValidation();
         UpdateSwimmingStatus();
-        
-        // 1. Verificar agua/natación
+
+        // 1. Verificar comida/bebida
+        if (isEating || isDrinking)
+        {
+            if (showMovementWarnings)
+            {
+                if (isEating)
+                {
+                    Debug.LogWarning("🍖 ¡No puede dormir mientras COME!");
+                    Debug.LogWarning("💡 Deja de comer primero");
+                }
+                else if (isDrinking)
+                {
+                    Debug.LogWarning("💧 ¡No puede dormir mientras BEBE!");
+                    Debug.LogWarning("💡 Deja de beber primero");
+                }
+            }
+
+            PlaySound(cannotSleepSound);
+            StartCoroutine(FlashButton(Color.magenta));
+
+            // Reactivar el botón después del flash (para que pueda intentar de nuevo)
+            StartCoroutine(ReenableButtonAfterDelay(0.6f));
+            return;
+        }
+
+        // 2. Verificar agua/natación
         if (preventSleepWhileSwimming && (isInWater || isSwimming))
         {
             if (showMovementWarnings)
@@ -573,16 +654,16 @@ public class DinosaurSleepSystem : MonoBehaviour
                     Debug.LogWarning("💡 Sal completamente del agua a tierra seca");
                 }
             }
-            
+
             PlaySound(cannotSleepSound);
             StartCoroutine(FlashButton(Color.cyan));
-            
+
             // Reactivar el botón después del flash (para que pueda intentar de nuevo)
             StartCoroutine(ReenableButtonAfterDelay(0.6f));
             return;
         }
-        
-        // 2. Verificar movimiento
+
+        // 3. Verificar movimiento
         if (currentSpeed > stoppedSpeedThreshold || currentJoystickInput > joystickDeadZone)
         {
             if (showMovementWarnings)
@@ -901,6 +982,14 @@ public class DinosaurSleepSystem : MonoBehaviour
                 if (isInCooldown && showCooldownInText)
                 {
                     sleepButtonText.text = $"⏱️ {Mathf.CeilToInt(cooldownTimeRemaining)}s";
+                }
+                else if (isEating)
+                {
+                    sleepButtonText.text = "🍖 Comiendo";
+                }
+                else if (isDrinking)
+                {
+                    sleepButtonText.text = "💧 Bebiendo";
                 }
                 else if (isSwimming)
                 {
