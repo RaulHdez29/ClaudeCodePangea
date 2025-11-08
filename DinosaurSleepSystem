@@ -300,6 +300,15 @@ public class DinosaurSleepSystem : MonoBehaviour
 
         // Limitar al máximo
         dinosaurController.currentStamina = Mathf.Clamp(dinosaurController.currentStamina, 0f, dinosaurController.maxStamina);
+
+        // ⭐ Actualizar barra UI de estamina durante el sueño
+        if (dinosaurController.staminaBar != null)
+        {
+            dinosaurController.staminaBar.fillAmount = dinosaurController.currentStamina / dinosaurController.maxStamina;
+        }
+
+        // Debug para verificar que está regenerando
+        // Debug.Log($"⚡ Regenerando estamina durante sueño: {dinosaurController.currentStamina:F1}/{dinosaurController.maxStamina:F1}");
     }
 
     /// <summary>

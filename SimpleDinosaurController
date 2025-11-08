@@ -1672,7 +1672,7 @@ void UpdateTimers()
 			currentThirst = Mathf.Clamp(currentThirst, 0f, maxThirst);
 		}
 
-		// ⚡ Estamina - Consumo al correr
+		// ⚡ Estamina - Consumo al correr (basado en velocidad real, no en el botón)
 		if (isRunning && currentSpeed > movementThreshold && !isEating && !isDrinking)
 		{
 			currentStamina -= staminaDrainRate * Time.deltaTime;
@@ -1684,11 +1684,12 @@ void UpdateTimers()
 				isRunning = false;
 			}
 		}
-		// ⚡ Estamina - Regeneración
-		else if (!isRunning && !isEating && !isDrinking)
+		// ⚡ Estamina - Regeneración (cuando NO está corriendo activamente)
+		// Se regenera si: NO se está moviendo rápido O si no está comiendo/bebiendo
+		else if (currentSpeed <= movementThreshold && !isEating && !isDrinking)
 		{
 			// Verificar si está durmiendo para regenerar más rápido (usando referencia cacheada)
-			// NOTA: Cuando está durmiendo, el DinosaurSleepSystem maneja la regeneración directamente
+			// NOTA: Cuando está durmiendo, el DinosaurSleepSystem también maneja la regeneración
 			// porque este script se desactiva durante el sueño
 			float regenRate = (sleepSystemCache != null && sleepSystemCache.IsSleeping) ? staminaSleepRegenRate : staminaRegenRate;
 
