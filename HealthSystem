@@ -1,0 +1,302 @@
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.Events;
+
+// SISTEMA DE SALUD
+// Agregar a cualquier objeto que pueda recibir daño
+
+public class HealthSystem : MonoBehaviour
+{
+    [Header("Configuración de Salud")]
+    [Tooltip("Vida máxima")]
+    public float maxHealth = 100f;
+    [Tooltip("Vida actual")]
+    public float currentHealth = 100f;
+    [Tooltip("Puede morir")]
+    public bool canDie = true;
+    [Tooltip("Destruir objeto al morir")]
+    public bool destroyOnDeath = true;
+    [Tooltip("Tiempo antes de destruir (segundos)")]
+    public float destroyDelay = 2f;
+    
+    [Header("UI de Salud")]
+    [Tooltip("Barra de vida (Image)")]
+    public Image healthBar;
+    [Tooltip("Canvas de la barra de vida")]
+    public Canvas healthBarCanvas;
+    [Tooltip("Siempre mirar a la cámara")]
+    public bool billboardHealthBar = true;
+    
+    [Header("Efectos Visuales")]
+    [Tooltip("Efecto de partículas al recibir daño")]
+    public GameObject damageEffect;
+    [Tooltip("Efecto de partículas al morir")]
+    public GameObject deathEffect;
+    [Tooltip("Material de daño (opcional)")]
+    public Material damageMaterial;
+    [Tooltip("Duración del efecto de daño")]
+    public float damageMaterialDuration = 0.2f;
+    
+    [Header("Audio")]
+    public AudioClip[] hurtSounds;
+    public AudioClip[] deathSounds;
+    public AudioSource audioSource;
+    
+    [Header("Estado")]
+    public bool isDead = false;
+    public bool isInvulnerable = false;
+    
+    [Header("Eventos")]
+    public UnityEvent onDamageTaken;
+    public UnityEvent onDeath;
+    public UnityEvent onHealthChanged;
+    
+    // Variables internas
+    private Renderer[] renderers;
+    private Material[] originalMaterials;
+    private Camera mainCamera;
+    
+    void Start()
+    {
+        currentHealth = maxHealth;
+        
+        if (audioSource == null)
+            audioSource = GetComponent<AudioSource>();
+        
+        // Obtener renderers para efectos de daño
+        renderers = GetComponentsInChildren<Renderer>();
+        if (renderers.Length > 0 && damageMaterial != null)
+        {
+            originalMaterials = new Material[renderers.Length];
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                originalMaterials[i] = renderers[i].material;
+            }
+        }
+        
+        mainCamera = Camera.main;
+        
+        UpdateHealthBar();
+    }
+    
+    void Update()
+    {
+        // Billboard de la barra de vida
+        if (billboardHealthBar && healthBarCanvas != null && mainCamera != null)
+        {
+            healthBarCanvas.transform.LookAt(healthBarCanvas.transform.position + mainCamera.transform.forward);
+        }
+    }
+    
+    /// <summary>
+    /// Recibir daño
+    /// </summary>
+    public void TakeDamage(float damage, Vector3 damageSource = default)
+    {
+        if (isDead || isInvulnerable || damage <= 0) return;
+        
+        // Aplicar daño
+        currentHealth -= damage;
+        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+        
+        Debug.Log($"{gameObject.name} recibió {damage} de daño. Vida restante: {currentHealth}/{maxHealth}");
+        
+        // Actualizar UI
+        UpdateHealthBar();
+        
+        // Eventos
+        onDamageTaken?.Invoke();
+        onHealthChanged?.Invoke();
+        
+        // Efectos visuales
+        if (damageEffect != null)
+        {
+            Instantiate(damageEffect, transform.position, Quaternion.identity);
+        }
+        
+        // Efecto de material
+        if (damageMaterial != null && renderers.Length > 0)
+        {
+            StartCoroutine(DamageMaterialEffect());
+        }
+        
+        // Sonido
+        if (hurtSounds != null && hurtSounds.Length > 0 && audioSource != null)
+        {
+            AudioClip hurtClip = hurtSounds[Random.Range(0, hurtSounds.Length)];
+            audioSource.PlayOneShot(hurtClip);
+        }
+        
+        // Verificar muerte
+        if (currentHealth <= 0 && canDie)
+        {
+            Die();
+        }
+    }
+    
+    /// <summary>
+    /// Curar vida
+    /// </summary>
+    public void Heal(float amount)
+    {
+        if (isDead) return;
+        
+        currentHealth += amount;
+        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+        
+        UpdateHealthBar();
+        onHealthChanged?.Invoke();
+        
+        Debug.Log($"{gameObject.name} curado por {amount}. Vida: {currentHealth}/{maxHealth}");
+    }
+    
+    /// <summary>
+    /// Establecer vida
+    /// </summary>
+    public void SetHealth(float health)
+    {
+        currentHealth = Mathf.Clamp(health, 0, maxHealth);
+        UpdateHealthBar();
+        onHealthChanged?.Invoke();
+    }
+    
+    /// <summary>
+    /// Muerte
+    /// </summary>
+    void Die()
+    {
+        if (isDead) return;
+        
+        isDead = true;
+        currentHealth = 0;
+        
+        Debug.Log($"{gameObject.name} ha muerto!");
+        
+        // Evento de muerte
+        onDeath?.Invoke();
+        
+        // Efecto de muerte
+        if (deathEffect != null)
+        {
+            Instantiate(deathEffect, transform.position, Quaternion.identity);
+        }
+        
+        // Sonido de muerte
+        if (deathSounds != null && deathSounds.Length > 0 && audioSource != null)
+        {
+            AudioClip deathClip = deathSounds[Random.Range(0, deathSounds.Length)];
+            audioSource.PlayOneShot(deathClip);
+        }
+        
+        // Ocultar barra de vida
+        if (healthBarCanvas != null)
+        {
+            healthBarCanvas.gameObject.SetActive(false);
+        }
+        
+        // Destruir objeto
+        if (destroyOnDeath)
+        {
+            Destroy(gameObject, destroyDelay);
+        }
+    }
+    
+    /// <summary>
+    /// Actualizar barra de vida
+    /// </summary>
+    void UpdateHealthBar()
+    {
+        if (healthBar != null)
+        {
+            healthBar.fillAmount = currentHealth / maxHealth;
+            
+            // Cambiar color según porcentaje de vida
+            if (currentHealth / maxHealth > 0.6f)
+            {
+                healthBar.color = Color.green;
+            }
+            else if (currentHealth / maxHealth > 0.3f)
+            {
+                healthBar.color = Color.yellow;
+            }
+            else
+            {
+                healthBar.color = Color.red;
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Efecto visual de daño
+    /// </summary>
+    System.Collections.IEnumerator DamageMaterialEffect()
+    {
+        // Cambiar a material de daño
+        foreach (Renderer rend in renderers)
+        {
+            rend.material = damageMaterial;
+        }
+        
+        yield return new WaitForSeconds(damageMaterialDuration);
+        
+        // Restaurar materiales originales
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            renderers[i].material = originalMaterials[i];
+        }
+    }
+    
+    /// <summary>
+    /// Hacer invulnerable temporalmente
+    /// </summary>
+    public void MakeInvulnerable(float duration)
+    {
+        StartCoroutine(InvulnerabilityCoroutine(duration));
+    }
+    
+    System.Collections.IEnumerator InvulnerabilityCoroutine(float duration)
+    {
+        isInvulnerable = true;
+        Debug.Log($"{gameObject.name} es invulnerable por {duration} segundos");
+        yield return new WaitForSeconds(duration);
+        isInvulnerable = false;
+        Debug.Log($"{gameObject.name} ya no es invulnerable");
+    }
+    
+    /// <summary>
+    /// Obtener porcentaje de vida
+    /// </summary>
+    public float GetHealthPercentage()
+    {
+        return currentHealth / maxHealth;
+    }
+    
+    /// <summary>
+    /// Está vivo
+    /// </summary>
+    public bool IsAlive()
+    {
+        return !isDead && currentHealth > 0;
+    }
+    
+    /// <summary>
+    /// Vida completa
+    /// </summary>
+    public bool IsFullHealth()
+    {
+        return currentHealth >= maxHealth;
+    }
+    
+    void OnGUI()
+    {
+        if (Application.isEditor && !isDead)
+        {
+            Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 2f);
+            if (screenPos.z > 0)
+            {
+                GUI.Label(new Rect(screenPos.x - 50, Screen.height - screenPos.y - 20, 100, 20), 
+                         $"HP: {currentHealth:F0}/{maxHealth:F0}");
+            }
+        }
+    }
+}
