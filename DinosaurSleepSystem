@@ -4,11 +4,12 @@ using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
-/// Sistema de sueño para el dinosaurio - VERSIÓN FINAL COMPLETA
+/// Sistema de sueño para el dinosaurio - VERSIÓN OPTIMIZADA
 /// ✅ Solo permite dormir cuando está COMPLETAMENTE DETENIDO
 /// ✅ NO permite dormir mientras nada
 /// ✅ Cooldown de 5 segundos después de presionar el botón
 /// ✅ Feedback visual y advertencias claras
+/// ⚡ OPTIMIZADO: Sin reflexión, código más eficiente (-70 líneas)
 /// </summary>
 public class DinosaurSleepSystem : MonoBehaviour
 {
@@ -120,11 +121,7 @@ public class DinosaurSleepSystem : MonoBehaviour
     private const string ANIM_SLEEP_EXIT = "SleepExit";
     private const string ANIM_IS_SLEEPING = "IsSleeping";
     private const string ANIM_SLEEP_STATE = "SleepState";
-    
-    // Parámetros del Animator que deben resetearse
-    private static readonly string[] ANIMATOR_FLOAT_PARAMS = { "Speed", "MoveX", "MoveZ", "TurnSpeed", "VerticalSpeed", "Turn", "Look" };
-    private static readonly string[] ANIMATOR_BOOL_PARAMS = { "IsGrounded", "IsRunning", "IsWalking", "IsJumping", "IsAttacking", "IsCalling", "IsSwimming" };
-    
+
     // Control de estado de botones
     private Dictionary<Button, bool> originalButtonStates = new Dictionary<Button, bool>();
     
@@ -245,204 +242,135 @@ public class DinosaurSleepSystem : MonoBehaviour
     }
     
     /// <summary>
-    /// Actualiza el estado de agua/natación del dinosaurio
+    /// Actualiza el estado de agua/natación del dinosaurio (OPTIMIZADO - sin reflexión)
     /// </summary>
     void UpdateSwimmingStatus()
     {
-        isInWater = false;
-        isSwimming = false;
-        
         if (dinosaurController != null)
         {
-            // ═══════════════════════════════════════════════════════════
-            // 🌊 DETECCIÓN 1: IsInWater (está en contacto con agua)
-            // ═══════════════════════════════════════════════════════════
-            var isInWaterField = typeof(SimpleDinosaurController).GetField("isInWater");
-            if (isInWaterField != null)
-            {
-                isInWater = (bool)isInWaterField.GetValue(dinosaurController);
-            }
-            
-            // ═══════════════════════════════════════════════════════════
-            // 🌊 DETECCIÓN 2: IsSwimming (está nadando activamente)
-            // ═══════════════════════════════════════════════════════════
-            var isSwimmingField = typeof(SimpleDinosaurController).GetField("isSwimming");
-            if (isSwimmingField != null)
-            {
-                isSwimming = (bool)isSwimmingField.GetValue(dinosaurController);
-            }
-            
-            // ═══════════════════════════════════════════════════════════
-            // 🌊 VERIFICACIÓN ADICIONAL: Parámetros del Animator
-            // ═══════════════════════════════════════════════════════════
-            if (animator != null)
-            {
-                // Verificar IsInWater en el Animator
-                if (HasParameter("IsInWater", AnimatorControllerParameterType.Bool))
-                {
-                    bool animatorInWater = animator.GetBool("IsInWater");
-                    isInWater = isInWater || animatorInWater;
-                }
-                
-                // Verificar IsSwimming en el Animator
-                if (HasParameter("IsSwimming", AnimatorControllerParameterType.Bool))
-                {
-                    bool animatorSwimming = animator.GetBool("IsSwimming");
-                    isSwimming = isSwimming || animatorSwimming;
-                }
-            }
+            // 🌊 Acceso directo a campos públicos del controller (más rápido que reflexión)
+            isInWater = dinosaurController.isInWater;
+            isSwimming = dinosaurController.isSwimming;
+        }
+        else
+        {
+            isInWater = false;
+            isSwimming = false;
         }
     }
     
     /// <summary>
-    /// Actualiza la validación de si puede dormir (verifica movimiento)
+    /// Actualiza la validación de si puede dormir (OPTIMIZADO)
     /// </summary>
     void UpdateMovementValidation()
     {
         // Verificar velocidad del CharacterController
-        currentSpeed = 0f;
-        if (characterController != null)
-        {
-            currentSpeed = characterController.velocity.magnitude;
-        }
-        
+        currentSpeed = characterController != null ? characterController.velocity.magnitude : 0f;
+
         // Verificar input del joystick
-        currentJoystickInput = 0f;
-        if (dinosaurController != null && dinosaurController.movementJoystick != null)
-        {
-            Vector2 joystickDir = dinosaurController.movementJoystick.Direction;
-            currentJoystickInput = joystickDir.magnitude;
-        }
-        
+        currentJoystickInput = (dinosaurController != null && dinosaurController.movementJoystick != null)
+            ? dinosaurController.movementJoystick.Direction.magnitude : 0f;
+
         // Verificar parámetro Speed del Animator
-        float animatorSpeed = 0f;
-        if (animator != null && HasParameter("Speed", AnimatorControllerParameterType.Float))
-        {
-            animatorSpeed = animator.GetFloat("Speed");
-        }
-        
-        // El dinosaurio está detenido si TODAS estas condiciones se cumplen:
-        bool isSpeedZero = currentSpeed <= stoppedSpeedThreshold;
-        bool isJoystickZero = currentJoystickInput <= joystickDeadZone;
-        bool isAnimatorSpeedZero = animatorSpeed <= stoppedSpeedThreshold;
-        
-        // ═══════════════════════════════════════════════════════════
-        // 🌊 VALIDACIÓN DE AGUA: NO puede dormir si está en agua O nadando
-        // ═══════════════════════════════════════════════════════════
+        float animatorSpeed = (animator != null && HasParameter("Speed", AnimatorControllerParameterType.Float))
+            ? animator.GetFloat("Speed") : 0f;
+
+        // Validación consolidada: Detenido + No en agua + No en cooldown
+        bool isStopped = currentSpeed <= stoppedSpeedThreshold &&
+                        currentJoystickInput <= joystickDeadZone &&
+                        animatorSpeed <= stoppedSpeedThreshold;
+
         bool notInWater = !preventSleepWhileSwimming || (!isInWater && !isSwimming);
-        
-        bool notInCooldown = !isInCooldown;
-        
-        canSleepNow = isSpeedZero && isJoystickZero && isAnimatorSpeedZero && notInWater && notInCooldown;
+
+        canSleepNow = isStopped && notInWater && !isInCooldown;
     }
     
     /// <summary>
-    /// Actualiza el estado visual del botón de dormir
+    /// Actualiza el estado visual del botón de dormir (OPTIMIZADO)
     /// </summary>
     void UpdateSleepButtonState()
     {
         if (sleepButton == null || !hasOriginalColors) return;
-        
+
+        // Durante transiciones: siempre desactivado
+        if (SleepState == STATE_ENTERING_SLEEP || SleepState == STATE_WAKING)
+        {
+            sleepButton.interactable = false;
+            return;
+        }
+
+        // 🛡️ PRIORIDAD 1: COOLDOWN (desactivar en ambos estados)
+        if (isInCooldown)
+        {
+            SetButtonState(false, new Color(0.5f, 0.5f, 0.5f, 0.7f));
+            return;
+        }
+
+        // Estado AWAKE: verificar si puede dormir
         if (SleepState == STATE_AWAKE)
         {
-            // ═══════════════════════════════════════════════════════════
-            // 🛡️ PRIORIDAD 1: COOLDOWN (siempre se respeta)
-            // ═══════════════════════════════════════════════════════════
-            if (isInCooldown)
-            {
-                sleepButton.interactable = false;
-                ColorBlock colors = sleepButton.colors;
-                colors.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.7f); // Gris
-                sleepButton.colors = colors;
-                return; // ⚠️ En cooldown, no verificar otras condiciones
-            }
-            
-            // ═══════════════════════════════════════════════════════════
-            // PRIORIDAD 2: Otras validaciones (si NO hay cooldown)
-            // ═══════════════════════════════════════════════════════════
             if (!canSleepNow)
             {
-                sleepButton.interactable = false;
-                
-                ColorBlock colors = sleepButton.colors;
-                
-                // 🌊 Diferentes colores según el estado del agua
-                if (isSwimming)
-                {
-                    colors.disabledColor = new Color(0f, 0.4f, 1f, 0.6f); // Azul oscuro (nadando)
-                }
-                else if (isInWater)
-                {
-                    colors.disabledColor = new Color(0.3f, 0.7f, 1f, 0.5f); // Azul claro (en agua)
-                }
-                else
-                {
-                    colors.disabledColor = new Color(1f, 1f, 0f, 0.5f); // Amarillo (movimiento)
-                }
-                
-                sleepButton.colors = colors;
+                // Determinar color según el bloqueo
+                Color disabledColor = isSwimming ? new Color(0f, 0.4f, 1f, 0.6f) :   // Azul oscuro
+                                     isInWater ? new Color(0.3f, 0.7f, 1f, 0.5f) :    // Azul claro
+                                     new Color(1f, 1f, 0f, 0.5f);                      // Amarillo
+                SetButtonState(false, disabledColor);
             }
             else
             {
-                // ✅ TODO OK: Puede usar el botón
-                sleepButton.interactable = true;
-                sleepButton.colors = originalSleepButtonColors;
+                SetButtonState(true, originalSleepButtonColors.normalColor);
             }
         }
+        // Estado SLEEPING: puede despertar si no hay cooldown
         else if (SleepState == STATE_SLEEPING)
         {
-            // ═══════════════════════════════════════════════════════════
-            // 🛡️ CUANDO ESTÁ DURMIENDO: Solo puede despertar si no hay cooldown
-            // ═══════════════════════════════════════════════════════════
-            if (isInCooldown)
-            {
-                sleepButton.interactable = false;
-                ColorBlock colors = sleepButton.colors;
-                colors.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.7f); // Gris
-                sleepButton.colors = colors;
-            }
-            else
-            {
-                // ✅ Cooldown terminado: Puede despertar
-                sleepButton.interactable = true;
-                sleepButton.colors = originalSleepButtonColors;
-            }
+            SetButtonState(true, originalSleepButtonColors.normalColor);
+        }
+    }
+
+    /// <summary>
+    /// Establece el estado del botón de sueño (función auxiliar)
+    /// </summary>
+    void SetButtonState(bool interactable, Color disabledColor)
+    {
+        sleepButton.interactable = interactable;
+        if (!interactable)
+        {
+            ColorBlock colors = sleepButton.colors;
+            colors.disabledColor = disabledColor;
+            sleepButton.colors = colors;
         }
         else
         {
-            // Durante transiciones (ENTERING_SLEEP, WAKING)
-            // Mantener el botón desactivado
-            sleepButton.interactable = false;
+            sleepButton.colors = originalSleepButtonColors;
         }
     }
     
     /// <summary>
-    /// Auto-detecta botones del DinosaurController
+    /// Auto-detecta botones del DinosaurController (OPTIMIZADO - acceso directo)
     /// </summary>
     void AutoDetectButtons()
     {
         if (dinosaurController == null) return;
-        
+
         List<Button> detectedButtons = new List<Button>();
-        
-        var fields = typeof(SimpleDinosaurController).GetFields();
-        foreach (var field in fields)
-        {
-            if (field.FieldType == typeof(Button))
-            {
-                Button btn = field.GetValue(dinosaurController) as Button;
-                if (btn != null && btn != sleepButton)
-                {
-                    detectedButtons.Add(btn);
-                }
-            }
-        }
-        
+
+        // Acceso directo a los botones públicos (sin reflexión)
+        if (dinosaurController.runButton != null && dinosaurController.runButton != sleepButton)
+            detectedButtons.Add(dinosaurController.runButton);
+        if (dinosaurController.callButton != null && dinosaurController.callButton != sleepButton)
+            detectedButtons.Add(dinosaurController.callButton);
+        if (dinosaurController.jumpButton != null && dinosaurController.jumpButton != sleepButton)
+            detectedButtons.Add(dinosaurController.jumpButton);
+        if (dinosaurController.attackButton != null && dinosaurController.attackButton != sleepButton)
+            detectedButtons.Add(dinosaurController.attackButton);
+
         buttonsToDisable = detectedButtons.ToArray();
-        
+
         if (buttonsToDisable.Length > 0)
         {
-            Debug.Log($"✅ SleepSystem: Auto-detectados {buttonsToDisable.Length} botones para desactivar durante el sueño");
+            Debug.Log($"✅ SleepSystem: Auto-detectados {buttonsToDisable.Length} botones");
         }
     }
     
@@ -774,36 +702,40 @@ public class DinosaurSleepSystem : MonoBehaviour
     }
     
     /// <summary>
-    /// Resetea completamente el Animator al estado Idle
+    /// Resetea el Animator al estado Idle (OPTIMIZADO - solo parámetros críticos)
     /// </summary>
     private void ResetAnimatorToIdle()
     {
         if (animator == null) return;
-        
-        foreach (string paramName in ANIMATOR_FLOAT_PARAMS)
-        {
-            if (HasParameter(paramName, AnimatorControllerParameterType.Float))
-            {
-                animator.SetFloat(paramName, 0f);
-            }
-        }
-        
-        foreach (string paramName in ANIMATOR_BOOL_PARAMS)
-        {
-            if (HasParameter(paramName, AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool(paramName, false);
-            }
-        }
-        
-        string[] commonTriggers = { "Jump", "Attack", "Call", "Hit", "Death" };
-        foreach (string triggerName in commonTriggers)
-        {
-            if (HasParameter(triggerName, AnimatorControllerParameterType.Trigger))
-            {
-                animator.ResetTrigger(triggerName);
-            }
-        }
+
+        // Resetear solo parámetros críticos para el sueño (más rápido)
+        SetAnimatorFloatSafe("Speed", 0f);
+        SetAnimatorFloatSafe("MoveX", 0f);
+        SetAnimatorFloatSafe("MoveZ", 0f);
+        SetAnimatorFloatSafe("VerticalSpeed", 0f);
+
+        SetAnimatorBoolSafe("IsGrounded", true);
+        SetAnimatorBoolSafe("IsRunning", false);
+        SetAnimatorBoolSafe("IsAttacking", false);
+        SetAnimatorBoolSafe("IsSwimming", false);
+
+        // Resetear triggers comunes
+        animator.ResetTrigger("Jump");
+        animator.ResetTrigger("Attack");
+        animator.ResetTrigger("Call");
+    }
+
+    // Funciones auxiliares para evitar errores si el parámetro no existe
+    void SetAnimatorFloatSafe(string param, float value)
+    {
+        if (HasParameter(param, AnimatorControllerParameterType.Float))
+            animator.SetFloat(param, value);
+    }
+
+    void SetAnimatorBoolSafe(string param, bool value)
+    {
+        if (HasParameter(param, AnimatorControllerParameterType.Bool))
+            animator.SetBool(param, value);
     }
     
     /// <summary>
