@@ -303,6 +303,23 @@ public class DinosaurSleepSystem : MonoBehaviour
 
         // Limitar al máximo
         dinosaurController.currentStamina = Mathf.Clamp(dinosaurController.currentStamina, 0f, dinosaurController.maxStamina);
+
+        // 📊 Actualizar la barra de estamina UI en tiempo real
+        UpdateStaminaBar();
+    }
+
+    /// <summary>
+    /// Actualiza la barra de estamina UI (mientras duerme)
+    /// </summary>
+    void UpdateStaminaBar()
+    {
+        if (dinosaurController == null) return;
+
+        // Actualizar solo la barra de estamina (las otras no cambian mientras duerme)
+        if (dinosaurController.staminaBar != null)
+        {
+            dinosaurController.staminaBar.fillAmount = dinosaurController.currentStamina / dinosaurController.maxStamina;
+        }
     }
 
     /// <summary>
