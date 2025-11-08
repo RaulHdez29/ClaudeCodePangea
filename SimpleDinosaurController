@@ -1709,60 +1709,37 @@ void UpdateTimers()
 		Collider[] foodColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
 		nearbyFood = null;
 
-		Debug.Log($"🔍 DetectFoodAndWater ejecutándose. Colliders detectados: {foodColliders.Length}, Radio: {foodDetectionRange}");
-
 		foreach (Collider col in foodColliders)
 		{
-			Debug.Log($"📦 Collider encontrado: {col.gameObject.name}, Tag: {col.gameObject.tag}, Layer: {LayerMask.LayerToName(col.gameObject.layer)}");
-
-			if (col.gameObject.CompareTag("Food"))
+			if (col.CompareTag("Food"))
 			{
 				nearbyFood = col.gameObject;
-				Debug.Log($"🍖 ✅ Comida detectada: {col.gameObject.name}");
 				break;
 			}
 		}
 
-		// 💧 Detectar agua cercana (tag "Water", no confundir con waterLayer para nadar)
+		// 💧 Detectar agua cercana
 		Collider[] waterColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
 		nearbyWater = null;
 
 		foreach (Collider col in waterColliders)
 		{
-			// Verificar que tenga el tag "Water" (para beber)
-			if (col.gameObject.CompareTag("Water"))
+			if (col.CompareTag("Water"))
 			{
 				nearbyWater = col.gameObject;
-				Debug.Log($"💧 ✅ Agua (para beber) detectada: {col.gameObject.name}");
 				break;
 			}
 		}
 
 		// 🖼️ Mostrar/ocultar botones según proximidad
-		Debug.Log($"🖼️ eatButton: {(eatButton != null ? "Asignado" : "NULL")}, drinkButton: {(drinkButton != null ? "Asignado" : "NULL")}");
-
 		if (eatButton != null)
 		{
-			bool shouldShowEat = nearbyFood != null && !isDrinking;
-			Debug.Log($"🍖 shouldShowEat: {shouldShowEat}, nearbyFood: {(nearbyFood != null ? nearbyFood.name : "null")}, isDrinking: {isDrinking}");
-
-			eatButton.gameObject.SetActive(shouldShowEat);
-		}
-		else
-		{
-			Debug.LogWarning("⚠️ eatButton es NULL! Asígnalo en el Inspector.");
+			eatButton.gameObject.SetActive(nearbyFood != null && !isDrinking);
 		}
 
 		if (drinkButton != null)
 		{
-			bool shouldShowDrink = nearbyWater != null && !isEating;
-			Debug.Log($"💧 shouldShowDrink: {shouldShowDrink}, nearbyWater: {(nearbyWater != null ? nearbyWater.name : "null")}, isEating: {isEating}");
-
-			drinkButton.gameObject.SetActive(shouldShowDrink);
-		}
-		else
-		{
-			Debug.LogWarning("⚠️ drinkButton es NULL! Asígnalo en el Inspector.");
+			drinkButton.gameObject.SetActive(nearbyWater != null && !isEating);
 		}
 	}
 
