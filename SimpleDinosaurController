@@ -259,6 +259,28 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("Duración de la animación de beber")]
     public float drinkAnimationDuration = 2f;
 
+    [Header("❤️ SISTEMA DE SALUD")]
+    [Tooltip("Salud máxima del dinosaurio")]
+    public float maxHealth = 200f;
+    [Tooltip("Salud actual del dinosaurio")]
+    [Range(0f, 200f)]
+    public float currentHealth = 200f;
+    [Tooltip("Cantidad de vida que se pierde por segundo cuando hunger = 0")]
+    public float healthLossRateFromHunger = 2f;
+    [Tooltip("Cantidad de vida que se pierde por segundo cuando thirst = 0")]
+    public float healthLossRateFromThirst = 3f;
+    [Tooltip("Multiplicador de pérdida de vida cuando ambos (hunger y thirst) están en 0")]
+    public float criticalHealthLossMultiplier = 2f;
+
+    [Header("🩸 UI de Daño Visual")]
+    [Tooltip("Imagen UI que mostrará los sprites de daño")]
+    public UnityEngine.UI.Image damageOverlayImage;
+    [Tooltip("Sprites de daño por niveles (0=90% vida, 1=80% vida, ..., 8=10% vida)")]
+    public Sprite[] damageSprites = new Sprite[9];
+    [Tooltip("Velocidad de transición de opacidad del efecto de daño")]
+    [Range(0.1f, 5f)]
+    public float damageOverlayFadeSpeed = 2f;
+
     // Estados
     public enum MovementState
     {
@@ -315,6 +337,11 @@ public class SimpleDinosaurController : MonoBehaviour
     private GameObject nearestWaterSource = null;
     private bool isFoodInRange = false;
     private bool isWaterSourceInRange = false;
+
+    // ❤️ Variables de sistema de salud
+    private int currentDamageLevel = -1; // -1 = sin daño, 0-8 = niveles de daño
+    private float targetDamageAlpha = 0f;
+    private float currentDamageAlpha = 0f;
 
     // Character Controller
     private CharacterController controller;
@@ -406,6 +433,10 @@ public class SimpleDinosaurController : MonoBehaviour
         }
 
         SetupButtonListeners();
+
+        // ❤️ Inicializar sistema de salud
+        currentHealth = maxHealth;
+        InitializeDamageOverlay();
     }
     
     void SetupButtonListeners()
@@ -631,6 +662,10 @@ public class SimpleDinosaurController : MonoBehaviour
 
         // 🍖 Actualizar sistema de necesidades
         UpdateNeedsSystem();
+
+        // ❤️ Actualizar sistema de salud
+        UpdateHealthSystem();
+        UpdateDamageOverlay();
 
         // 🍖 Detectar comida y agua cercana
         DetectFoodAndWater();
@@ -1824,6 +1859,175 @@ void UpdateTimers()
             animator.SetFloat("Thirst", thirst);
             animator.SetFloat("Stamina", stamina);
         }
+    }
+
+    // ❤️ SISTEMA DE SALUD
+    void UpdateHealthSystem()
+    {
+        // ❤️ Pérdida de vida por hambre y sed
+        bool isHungry = hunger >= 100f;
+        bool isThirsty = thirst >= 100f;
+
+        if (isHungry || isThirsty)
+        {
+            float healthLoss = 0f;
+
+            // Calcular pérdida de vida
+            if (isHungry && isThirsty)
+            {
+                // 🔥 CRÍTICO: Ambos en 100, pérdida acelerada
+                healthLoss = (healthLossRateFromHunger + healthLossRateFromThirst) * criticalHealthLossMultiplier;
+                Debug.LogWarning($"💀 ¡CRÍTICO! Hambre y sed al máximo. Perdiendo {healthLoss:F1} vida/s");
+            }
+            else if (isHungry)
+            {
+                // 🍖 Solo hambre en 100
+                healthLoss = healthLossRateFromHunger;
+            }
+            else if (isThirsty)
+            {
+                // 💧 Solo sed en 100
+                healthLoss = healthLossRateFromThirst;
+            }
+
+            // Reducir salud
+            currentHealth = Mathf.Clamp(currentHealth - healthLoss * Time.deltaTime, 0f, maxHealth);
+
+            // Verificar muerte
+            if (currentHealth <= 0f)
+            {
+                OnDeath();
+            }
+        }
+
+        // Actualizar parámetro del Animator
+        if (animator != null)
+        {
+            float healthPercentage = (currentHealth / maxHealth) * 100f;
+            animator.SetFloat("Health", healthPercentage);
+        }
+    }
+
+    void InitializeDamageOverlay()
+    {
+        if (damageOverlayImage != null)
+        {
+            // Inicialmente oculto
+            Color color = damageOverlayImage.color;
+            color.a = 0f;
+            damageOverlayImage.color = color;
+            damageOverlayImage.enabled = true;
+        }
+    }
+
+    void UpdateDamageOverlay()
+    {
+        if (damageOverlayImage == null) return;
+
+        // Calcular porcentaje de vida
+        float healthPercentage = (currentHealth / maxHealth) * 100f;
+
+        int newDamageLevel = -1; // -1 = sin daño
+        Sprite newSprite = null;
+
+        // Determinar nivel de daño según el porcentaje de vida
+        // sprite[0] = 90% (10% perdido)
+        // sprite[1] = 80% (20% perdido)
+        // ...
+        // sprite[8] = 10% (90% perdido)
+
+        if (healthPercentage <= 10f && healthPercentage > 0f)
+        {
+            newDamageLevel = 8; // 10% vida restante
+            if (damageSprites.Length > 8) newSprite = damageSprites[8];
+        }
+        else if (healthPercentage <= 20f)
+        {
+            newDamageLevel = 7; // 20% vida restante
+            if (damageSprites.Length > 7) newSprite = damageSprites[7];
+        }
+        else if (healthPercentage <= 30f)
+        {
+            newDamageLevel = 6; // 30% vida restante
+            if (damageSprites.Length > 6) newSprite = damageSprites[6];
+        }
+        else if (healthPercentage <= 40f)
+        {
+            newDamageLevel = 5; // 40% vida restante
+            if (damageSprites.Length > 5) newSprite = damageSprites[5];
+        }
+        else if (healthPercentage <= 50f)
+        {
+            newDamageLevel = 4; // 50% vida restante
+            if (damageSprites.Length > 4) newSprite = damageSprites[4];
+        }
+        else if (healthPercentage <= 60f)
+        {
+            newDamageLevel = 3; // 60% vida restante
+            if (damageSprites.Length > 3) newSprite = damageSprites[3];
+        }
+        else if (healthPercentage <= 70f)
+        {
+            newDamageLevel = 2; // 70% vida restante
+            if (damageSprites.Length > 2) newSprite = damageSprites[2];
+        }
+        else if (healthPercentage <= 80f)
+        {
+            newDamageLevel = 1; // 80% vida restante
+            if (damageSprites.Length > 1) newSprite = damageSprites[1];
+        }
+        else if (healthPercentage <= 90f)
+        {
+            newDamageLevel = 0; // 90% vida restante
+            if (damageSprites.Length > 0) newSprite = damageSprites[0];
+        }
+        // Si healthPercentage > 90%, newDamageLevel sigue siendo -1 (sin daño)
+
+        // Cambiar sprite si el nivel cambió
+        if (newDamageLevel != currentDamageLevel)
+        {
+            currentDamageLevel = newDamageLevel;
+
+            if (currentDamageLevel >= 0 && newSprite != null)
+            {
+                // Mostrar overlay de daño
+                damageOverlayImage.sprite = newSprite;
+                targetDamageAlpha = Mathf.Lerp(0.3f, 0.9f, currentDamageLevel / 8f); // Más opaco cuanto más daño
+            }
+            else
+            {
+                // Sin daño, ocultar overlay
+                targetDamageAlpha = 0f;
+            }
+        }
+
+        // Suavizar transición de alpha
+        currentDamageAlpha = Mathf.Lerp(currentDamageAlpha, targetDamageAlpha, Time.deltaTime * damageOverlayFadeSpeed);
+
+        // Aplicar alpha
+        Color color = damageOverlayImage.color;
+        color.a = currentDamageAlpha;
+        damageOverlayImage.color = color;
+    }
+
+    void OnDeath()
+    {
+        Debug.Log("💀 Dinosaurio ha muerto!");
+
+        // Activar animación de muerte si existe
+        if (animator != null)
+        {
+            animator.SetTrigger("Death");
+            animator.SetBool("IsDead", true);
+        }
+
+        // Deshabilitar el controlador
+        this.enabled = false;
+
+        // Aquí puedes añadir lógica adicional de muerte:
+        // - Mostrar pantalla de Game Over
+        // - Reproducir sonido de muerte
+        // - etc.
     }
 
     // 🍖 DETECCIÓN DE COMIDA Y AGUA
