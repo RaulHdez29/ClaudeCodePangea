@@ -8,16 +8,26 @@ using UnityEngine.Events;
 public class HealthSystem : MonoBehaviour
 {
     [Header("Configuración de Salud")]
-    [Tooltip("Vida máxima")]
-    public float maxHealth = 100f;
+    [Tooltip("Vida máxima (100% = este valor)")]
+    public float maxHealth = 200f;
     [Tooltip("Vida actual")]
-    public float currentHealth = 100f;
+    public float currentHealth = 200f;
     [Tooltip("Puede morir")]
     public bool canDie = true;
     [Tooltip("Destruir objeto al morir")]
     public bool destroyOnDeath = true;
     [Tooltip("Tiempo antes de destruir (segundos)")]
     public float destroyDelay = 2f;
+
+	[Header("🍖 Sistema de Hambre/Sed")]
+	[Tooltip("Referencia al controlador del dinosaurio")]
+	public SimpleDinosaurController dinosaurController;
+	[Tooltip("Daño por segundo cuando hambre = 0")]
+	public float hungerDamageRate = 2f;
+	[Tooltip("Daño por segundo cuando sed = 0")]
+	public float thirstDamageRate = 3f;
+	[Tooltip("Multiplicador de daño cuando ambos están en 0")]
+	public float combinedDamageMultiplier = 2.5f;
     
     [Header("UI de Salud")]
     [Tooltip("Barra de vida (Image)")]
@@ -36,6 +46,13 @@ public class HealthSystem : MonoBehaviour
     public Material damageMaterial;
     [Tooltip("Duración del efecto de daño")]
     public float damageMaterialDuration = 0.2f;
+
+	[Header("🩸 UI de Daño Visual")]
+	[Tooltip("Imagen UI para mostrar daño visual (sangre)")]
+	public Image damageOverlayImage;
+	[Tooltip("Sprites de daño por nivel (índice 0 = 90%, 1 = 80%, ..., 8 = 10%)")]
+	public Sprite[] damageSprites = new Sprite[9];
+	private int currentDamageLevel = -1;
     
     [Header("Audio")]
     public AudioClip[] hurtSounds;
@@ -59,10 +76,14 @@ public class HealthSystem : MonoBehaviour
     void Start()
     {
         currentHealth = maxHealth;
-        
+
+		// Obtener referencia al controlador del dinosaurio si no está asignada
+		if (dinosaurController == null)
+			dinosaurController = GetComponent<SimpleDinosaurController>();
+
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
-        
+
         // Obtener renderers para efectos de daño
         renderers = GetComponentsInChildren<Renderer>();
         if (renderers.Length > 0 && damageMaterial != null)
@@ -73,9 +94,15 @@ public class HealthSystem : MonoBehaviour
                 originalMaterials[i] = renderers[i].material;
             }
         }
-        
+
         mainCamera = Camera.main;
-        
+
+		// Ocultar imagen de daño al inicio
+		if (damageOverlayImage != null)
+		{
+			damageOverlayImage.gameObject.SetActive(false);
+		}
+
         UpdateHealthBar();
     }
     
@@ -86,6 +113,12 @@ public class HealthSystem : MonoBehaviour
         {
             healthBarCanvas.transform.LookAt(healthBarCanvas.transform.position + mainCamera.transform.forward);
         }
+
+		// 🍖 Sistema de pérdida de vida por hambre/sed
+		UpdateHungerThirstDamage();
+
+		// 🩸 Actualizar UI de daño visual
+		UpdateDamageOverlay();
     }
     
     /// <summary>
@@ -286,7 +319,122 @@ public class HealthSystem : MonoBehaviour
     {
         return currentHealth >= maxHealth;
     }
-    
+
+	// ═══════════════════════════════════════════════════════════
+	// 🍖 SISTEMA DE HAMBRE/SED
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza daño por hambre y sed
+	/// </summary>
+	void UpdateHungerThirstDamage()
+	{
+		if (isDead || dinosaurController == null) return;
+
+		float hunger = dinosaurController.GetCurrentHunger();
+		float thirst = dinosaurController.GetCurrentThirst();
+
+		bool isHungry = hunger <= 0f;
+		bool isThirsty = thirst <= 0f;
+
+		// Si ambos están en 0, aplicar daño acelerado
+		if (isHungry && isThirsty)
+		{
+			float combinedDamage = (hungerDamageRate + thirstDamageRate) * combinedDamageMultiplier * Time.deltaTime;
+			currentHealth -= combinedDamage;
+			currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+
+			// Debug.Log($"⚠️ Hambre y sed en 0! Daño acelerado: {combinedDamage:F2}");
+		}
+		// Si solo hambre está en 0
+		else if (isHungry)
+		{
+			float damage = hungerDamageRate * Time.deltaTime;
+			currentHealth -= damage;
+			currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+
+			// Debug.Log($"⚠️ Hambre en 0! Daño: {damage:F2}");
+		}
+		// Si solo sed está en 0
+		else if (isThirsty)
+		{
+			float damage = thirstDamageRate * Time.deltaTime;
+			currentHealth -= damage;
+			currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+
+			// Debug.Log($"⚠️ Sed en 0! Daño: {damage:F2}");
+		}
+
+		// Actualizar UI
+		UpdateHealthBar();
+
+		// Verificar muerte
+		if (currentHealth <= 0 && canDie)
+		{
+			Die();
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 🩸 SISTEMA UI DE DAÑO VISUAL
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza la imagen de daño según el nivel de vida
+	/// </summary>
+	void UpdateDamageOverlay()
+	{
+		if (damageOverlayImage == null || damageSprites == null || damageSprites.Length != 9)
+			return;
+
+		// Calcular porcentaje de vida
+		float healthPercentage = (currentHealth / maxHealth) * 100f;
+
+		int newDamageLevel = -1;
+
+		// Determinar el nivel de daño (0 = 90%, 1 = 80%, ..., 8 = 10%)
+		if (healthPercentage <= 90f && healthPercentage > 80f)
+			newDamageLevel = 0;
+		else if (healthPercentage <= 80f && healthPercentage > 70f)
+			newDamageLevel = 1;
+		else if (healthPercentage <= 70f && healthPercentage > 60f)
+			newDamageLevel = 2;
+		else if (healthPercentage <= 60f && healthPercentage > 50f)
+			newDamageLevel = 3;
+		else if (healthPercentage <= 50f && healthPercentage > 40f)
+			newDamageLevel = 4;
+		else if (healthPercentage <= 40f && healthPercentage > 30f)
+			newDamageLevel = 5;
+		else if (healthPercentage <= 30f && healthPercentage > 20f)
+			newDamageLevel = 6;
+		else if (healthPercentage <= 20f && healthPercentage > 10f)
+			newDamageLevel = 7;
+		else if (healthPercentage <= 10f && healthPercentage > 0f)
+			newDamageLevel = 8;
+
+		// Solo actualizar si cambió el nivel
+		if (newDamageLevel != currentDamageLevel)
+		{
+			currentDamageLevel = newDamageLevel;
+
+			if (newDamageLevel == -1)
+			{
+				// Vida > 90%, ocultar imagen
+				damageOverlayImage.gameObject.SetActive(false);
+			}
+			else
+			{
+				// Mostrar imagen con el sprite correspondiente
+				damageOverlayImage.gameObject.SetActive(true);
+
+				if (damageSprites[newDamageLevel] != null)
+				{
+					damageOverlayImage.sprite = damageSprites[newDamageLevel];
+				}
+			}
+		}
+	}
+
     void OnGUI()
     {
         if (Application.isEditor && !isDead)

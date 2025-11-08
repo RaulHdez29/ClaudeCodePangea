@@ -145,7 +145,58 @@ public class SimpleDinosaurController : MonoBehaviour
 	public float callDuration = 2.5f; // ajusta según la duración de tu animación
 	private bool isCalling = false;
 	private float callTimer = 0f;
-    
+
+	[Header("🍖 Sistema de Hambre, Sed y Estamina")]
+	[Tooltip("Hambre máxima")]
+	[Range(0f, 200f)]
+	public float maxHunger = 100f;
+	[Tooltip("Hambre actual")]
+	public float currentHunger = 100f;
+	[Tooltip("Velocidad de degradación de hambre por segundo")]
+	public float hungerDecayRate = 0.5f;
+
+	[Tooltip("Sed máxima")]
+	[Range(0f, 200f)]
+	public float maxThirst = 100f;
+	[Tooltip("Sed actual")]
+	public float currentThirst = 100f;
+	[Tooltip("Velocidad de degradación de sed por segundo")]
+	public float thirstDecayRate = 0.7f;
+
+	[Tooltip("Estamina máxima")]
+	[Range(0f, 200f)]
+	public float maxStamina = 100f;
+	[Tooltip("Estamina actual")]
+	public float currentStamina = 100f;
+	[Tooltip("Velocidad de consumo de estamina al correr")]
+	public float staminaDrainRate = 10f;
+	[Tooltip("Velocidad de regeneración de estamina normal")]
+	public float staminaRegenRate = 5f;
+	[Tooltip("Velocidad de regeneración de estamina al dormir")]
+	public float staminaSleepRegenRate = 15f;
+
+	[Header("🍗 Sistema de Comer/Beber")]
+	[Tooltip("Distancia para detectar comida/agua")]
+	public float foodDetectionRange = 3f;
+	[Tooltip("Velocidad de aumento de hambre al comer")]
+	public float eatingSpeed = 15f;
+	[Tooltip("Velocidad de aumento de sed al beber")]
+	public float drinkingSpeed = 20f;
+	[Tooltip("Duración de animación de comer")]
+	public float eatingAnimationDuration = 2f;
+
+	[Header("🍖 UI de Comer/Beber")]
+	[Tooltip("Botón para comer (aparece cerca de comida)")]
+	public Button eatButton;
+	[Tooltip("Botón para beber (aparece cerca de agua)")]
+	public Button drinkButton;
+
+	// Estados de comer/beber
+	private bool isEating = false;
+	private bool isDrinking = false;
+	private GameObject nearbyFood = null;
+	private GameObject nearbyWater = null;
+
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
     public bool enableStaticTurn = true;
@@ -332,24 +383,38 @@ public class SimpleDinosaurController : MonoBehaviour
             runButton.onClick.RemoveAllListeners();
             runButton.onClick.AddListener(() => isRunning = !isRunning);
         }
-        
+
         if (callButton != null)
         {
             callButton.onClick.RemoveAllListeners();
             callButton.onClick.AddListener(PlayCallSound);
         }
-        
+
         if (jumpButton != null)
         {
             jumpButton.onClick.RemoveAllListeners();
             jumpButton.onClick.AddListener(TryJump);
         }
-        
+
         if (attackButton != null)
         {
             attackButton.onClick.RemoveAllListeners();
             attackButton.onClick.AddListener(TryAttack);
         }
+
+		if (eatButton != null)
+		{
+			eatButton.onClick.RemoveAllListeners();
+			eatButton.onClick.AddListener(ToggleEating);
+			eatButton.gameObject.SetActive(false); // Ocultar inicialmente
+		}
+
+		if (drinkButton != null)
+		{
+			drinkButton.onClick.RemoveAllListeners();
+			drinkButton.onClick.AddListener(ToggleDrinking);
+			drinkButton.gameObject.SetActive(false); // Ocultar inicialmente
+		}
     }
 
     // 📏 SISTEMA DE CONFIGURACIÓN AUTOMÁTICA POR TAMAÑO
@@ -488,16 +553,22 @@ public class SimpleDinosaurController : MonoBehaviour
     {
         // Leer input del joystick
         GetInput();
-        
+
+		// 🍖 Actualizar hambre, sed y estamina
+		UpdateHungerThirstStamina();
+
+		// 🍗 Detectar comida y agua cercana
+		DetectFoodAndWater();
+
         // Detectar pendientes
         CheckSlope();
-        
+
         // Calcular movimiento y rotación
         CalculateMovement();
-        
+
         // ⭐ FIX: Aplicar rotación separada
         ApplySeparatedRotation();
-        
+
         // Aplicar movimiento
         ApplyMovement();
 
@@ -516,10 +587,10 @@ public class SimpleDinosaurController : MonoBehaviour
 
         // Actualizar animaciones
         UpdateAnimations();
-        
+
         // Actualizar sistema de ataque
         UpdateAttackSystem();
-        
+
         // Actualizar Turn y Look basado en cámara
         UpdateCameraBasedTurnAndLook();
 
@@ -577,6 +648,15 @@ public class SimpleDinosaurController : MonoBehaviour
     
     void CalculateMovement()
     {
+		// 🍖 No moverse mientras come o bebe
+		if (isEating || isDrinking)
+		{
+			targetSpeed = 0f;
+			moveDirection = Vector3.zero;
+			currentSpeed = 0f;
+			return;
+		}
+
         // ⭐ FIX: Calcular dirección relativa a la cámara de forma más estable
         if (inputVector.magnitude > turnInPlaceThreshold)
         {
@@ -1070,6 +1150,9 @@ void UpdateAnimations()
     {
 		if (isCalling) return;
 
+		// 🍖 No atacar mientras come o bebe
+		if (isEating || isDrinking) return;
+
         // ✅ Usar variable unificada lastGroundedTime
         bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir)
                            && attackCooldownTimer <= 0f
@@ -1167,6 +1250,9 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
+		// 🍖 No saltar mientras come o bebe
+		if (isEating || isDrinking) return;
+
 		// ✅ FIX: Usar lastGroundedTime con tolerancia para evitar timing issues
 		// El botón ya está deshabilitado correctamente en la UI
 		bool isGroundedRecently = (Time.time - lastGroundedTime) <= 0.2f;
@@ -1306,6 +1392,9 @@ void UpdateTimers()
 	{
 		// Si ya está rugiendo o atacando, no permitir otro rugido
 		if (isCalling || isAttacking) return;
+
+		// 🍖 No rugir mientras come o bebe
+		if (isEating || isDrinking) return;
 
 		// Activar rugido
 		isCalling = true;
@@ -1530,6 +1619,292 @@ void UpdateTimers()
 
         Debug.Log("🏖️ Dinosaurio salió del agua!");
     }
+
+	// ═══════════════════════════════════════════════════════════
+	// 🍖 SISTEMA DE HAMBRE, SED Y ESTAMINA
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza hambre, sed y estamina
+	/// </summary>
+	void UpdateHungerThirstStamina()
+	{
+		// 🍖 No actualizar si está comiendo o bebiendo (se maneja en sus métodos)
+		if (!isEating && !isDrinking)
+		{
+			// Degradar hambre y sed constantemente
+			currentHunger -= hungerDecayRate * Time.deltaTime;
+			currentThirst -= thirstDecayRate * Time.deltaTime;
+
+			// Limitar valores
+			currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+			currentThirst = Mathf.Clamp(currentThirst, 0f, maxThirst);
+		}
+
+		// ⚡ Estamina - Consumo al correr
+		if (isRunning && currentSpeed > movementThreshold && !isEating && !isDrinking)
+		{
+			currentStamina -= staminaDrainRate * Time.deltaTime;
+
+			// Si se queda sin estamina, dejar de correr automáticamente
+			if (currentStamina <= 0f)
+			{
+				currentStamina = 0f;
+				isRunning = false;
+			}
+		}
+		// ⚡ Estamina - Regeneración
+		else if (!isRunning && !isEating && !isDrinking)
+		{
+			// Verificar si está durmiendo para regenerar más rápido
+			DinosaurSleepSystem sleepSystem = GetComponent<DinosaurSleepSystem>();
+			float regenRate = (sleepSystem != null && sleepSystem.IsSleeping) ? staminaSleepRegenRate : staminaRegenRate;
+
+			currentStamina += regenRate * Time.deltaTime;
+		}
+
+		// Limitar estamina
+		currentStamina = Mathf.Clamp(currentStamina, 0f, maxStamina);
+	}
+
+	/// <summary>
+	/// Detecta comida y agua cercana
+	/// </summary>
+	void DetectFoodAndWater()
+	{
+		// 🍗 Detectar comida cercana
+		Collider[] foodColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
+		nearbyFood = null;
+
+		foreach (Collider col in foodColliders)
+		{
+			if (col.CompareTag("Food"))
+			{
+				nearbyFood = col.gameObject;
+				break;
+			}
+		}
+
+		// 💧 Detectar agua cercana
+		Collider[] waterColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
+		nearbyWater = null;
+
+		foreach (Collider col in waterColliders)
+		{
+			if (col.CompareTag("Water"))
+			{
+				nearbyWater = col.gameObject;
+				break;
+			}
+		}
+
+		// 🖼️ Mostrar/ocultar botones según proximidad
+		if (eatButton != null)
+		{
+			eatButton.gameObject.SetActive(nearbyFood != null && !isDrinking);
+		}
+
+		if (drinkButton != null)
+		{
+			drinkButton.gameObject.SetActive(nearbyWater != null && !isEating);
+		}
+	}
+
+	/// <summary>
+	/// Alternar comer
+	/// </summary>
+	public void ToggleEating()
+	{
+		if (isEating)
+		{
+			// Dejar de comer
+			StopEating();
+		}
+		else
+		{
+			// Empezar a comer
+			StartEating();
+		}
+	}
+
+	/// <summary>
+	/// Empezar a comer
+	/// </summary>
+	void StartEating()
+	{
+		if (nearbyFood == null || currentHunger >= maxHunger) return;
+
+		isEating = true;
+
+		// Activar animación de comer
+		if (animator != null)
+		{
+			animator.SetBool("IsEating", true);
+			animator.SetTrigger("Eat");
+		}
+
+		Debug.Log("🍖 Dinosaurio comenzó a comer");
+
+		// Iniciar corrutina de comer
+		StartCoroutine(EatingCoroutine());
+	}
+
+	/// <summary>
+	/// Corrutina de comer
+	/// </summary>
+	System.Collections.IEnumerator EatingCoroutine()
+	{
+		while (isEating && currentHunger < maxHunger && nearbyFood != null)
+		{
+			// Aumentar hambre gradualmente
+			currentHunger += eatingSpeed * Time.deltaTime;
+			currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+
+			// Si se llenó, dejar de comer automáticamente
+			if (currentHunger >= maxHunger)
+			{
+				Debug.Log("🍖 Dinosaurio está lleno!");
+				StopEating();
+				yield break;
+			}
+
+			yield return null;
+		}
+
+		// Si se alejó de la comida, dejar de comer
+		if (nearbyFood == null)
+		{
+			StopEating();
+		}
+	}
+
+	/// <summary>
+	/// Dejar de comer
+	/// </summary>
+	void StopEating()
+	{
+		isEating = false;
+
+		// Desactivar animación de comer
+		if (animator != null)
+		{
+			animator.SetBool("IsEating", false);
+		}
+
+		StopCoroutine(EatingCoroutine());
+
+		Debug.Log("🍖 Dinosaurio dejó de comer");
+	}
+
+	/// <summary>
+	/// Alternar beber
+	/// </summary>
+	public void ToggleDrinking()
+	{
+		if (isDrinking)
+		{
+			// Dejar de beber
+			StopDrinking();
+		}
+		else
+		{
+			// Empezar a beber
+			StartDrinking();
+		}
+	}
+
+	/// <summary>
+	/// Empezar a beber
+	/// </summary>
+	void StartDrinking()
+	{
+		if (nearbyWater == null || currentThirst >= maxThirst) return;
+
+		isDrinking = true;
+
+		// Activar animación de beber
+		if (animator != null)
+		{
+			animator.SetBool("IsDrinking", true);
+			animator.SetTrigger("Drink");
+		}
+
+		Debug.Log("💧 Dinosaurio comenzó a beber");
+
+		// Iniciar corrutina de beber
+		StartCoroutine(DrinkingCoroutine());
+	}
+
+	/// <summary>
+	/// Corrutina de beber
+	/// </summary>
+	System.Collections.IEnumerator DrinkingCoroutine()
+	{
+		while (isDrinking && currentThirst < maxThirst && nearbyWater != null)
+		{
+			// Aumentar sed gradualmente
+			currentThirst += drinkingSpeed * Time.deltaTime;
+			currentThirst = Mathf.Clamp(currentThirst, 0f, maxThirst);
+
+			// Si se llenó, dejar de beber automáticamente
+			if (currentThirst >= maxThirst)
+			{
+				Debug.Log("💧 Dinosaurio ya no tiene sed!");
+				StopDrinking();
+				yield break;
+			}
+
+			yield return null;
+		}
+
+		// Si se alejó del agua, dejar de beber
+		if (nearbyWater == null)
+		{
+			StopDrinking();
+		}
+	}
+
+	/// <summary>
+	/// Dejar de beber
+	/// </summary>
+	void StopDrinking()
+	{
+		isDrinking = false;
+
+		// Desactivar animación de beber
+		if (animator != null)
+		{
+			animator.SetBool("IsDrinking", false);
+		}
+
+		StopCoroutine(DrinkingCoroutine());
+
+		Debug.Log("💧 Dinosaurio dejó de beber");
+	}
+
+	/// <summary>
+	/// Método público para obtener hambre actual (usado por HealthSystem)
+	/// </summary>
+	public float GetCurrentHunger()
+	{
+		return currentHunger;
+	}
+
+	/// <summary>
+	/// Método público para obtener sed actual (usado por HealthSystem)
+	/// </summary>
+	public float GetCurrentThirst()
+	{
+		return currentThirst;
+	}
+
+	/// <summary>
+	/// Método público para verificar si está comiendo o bebiendo
+	/// </summary>
+	public bool IsEatingOrDrinking()
+	{
+		return isEating || isDrinking;
+	}
 }
 
 // Interface para objetos que pueden recibir daño
