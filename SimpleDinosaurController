@@ -283,6 +283,7 @@ public class SimpleDinosaurController : MonoBehaviour
     public int enemiesInRange = 0;
     public bool isInWater = false;
     public bool isSwimming = false;
+    public bool isDead = false;
 
     // Character Controller
     private CharacterController controller;
@@ -551,6 +552,19 @@ public class SimpleDinosaurController : MonoBehaviour
 
     void Update()
     {
+		// 💀 Si está muerto, no hacer nada
+		if (isDead)
+		{
+			// Detener todo movimiento
+			moveDirection = Vector3.zero;
+			velocity.x = 0f;
+			velocity.z = 0f;
+			currentSpeed = 0f;
+			targetSpeed = 0f;
+			isRunning = false;
+			return;
+		}
+
         // Leer input del joystick
         GetInput();
 
@@ -1904,6 +1918,57 @@ void UpdateTimers()
 	public bool IsEatingOrDrinking()
 	{
 		return isEating || isDrinking;
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 💀 SISTEMA DE MUERTE
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Método público para matar al dinosaurio (llamado por HealthSystem)
+	/// </summary>
+	public void Die()
+	{
+		if (isDead) return;
+
+		isDead = true;
+
+		Debug.Log("💀 Dinosaurio ha muerto!");
+
+		// Detener todas las corrutinas activas
+		StopAllCoroutines();
+
+		// Detener estados
+		isEating = false;
+		isDrinking = false;
+		isAttacking = false;
+		isRunning = false;
+		isCalling = false;
+
+		// Activar animación de muerte
+		if (animator != null)
+		{
+			animator.SetBool("IsDead", true);
+			animator.SetTrigger("Death");
+
+			// Desactivar otros parámetros
+			animator.SetBool("IsEating", false);
+			animator.SetBool("IsDrinking", false);
+			animator.SetBool("IsAttacking", false);
+			animator.SetBool("IsRunning", false);
+			animator.SetFloat("Speed", 0f);
+			animator.SetFloat("MoveX", 0f);
+			animator.SetFloat("MoveZ", 0f);
+		}
+
+		// Desactivar el controlador de movimiento
+		if (controller != null)
+		{
+			controller.enabled = false;
+		}
+
+		// Desactivar este script
+		this.enabled = false;
 	}
 }
 

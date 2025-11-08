@@ -53,7 +53,11 @@ public class HealthSystem : MonoBehaviour
 	[Tooltip("Sprites de daño por nivel (índice 0 = 90%, 1 = 80%, ..., 8 = 10%)")]
 	public Sprite[] damageSprites = new Sprite[9];
 	private int currentDamageLevel = -1;
-    
+
+	[Header("💀 UI de Muerte")]
+	[Tooltip("Panel que se muestra cuando el dinosaurio muere")]
+	public GameObject deathPanel;
+
     [Header("Audio")]
     public AudioClip[] hurtSounds;
     public AudioClip[] deathSounds;
@@ -101,6 +105,12 @@ public class HealthSystem : MonoBehaviour
 		if (damageOverlayImage != null)
 		{
 			damageOverlayImage.gameObject.SetActive(false);
+		}
+
+		// Ocultar panel de muerte al inicio
+		if (deathPanel != null)
+		{
+			deathPanel.SetActive(false);
 		}
 
         UpdateHealthBar();
@@ -199,35 +209,47 @@ public class HealthSystem : MonoBehaviour
     void Die()
     {
         if (isDead) return;
-        
+
         isDead = true;
         currentHealth = 0;
-        
+
         Debug.Log($"{gameObject.name} ha muerto!");
-        
+
         // Evento de muerte
         onDeath?.Invoke();
-        
+
+		// 💀 Llamar al método Die() del SimpleDinosaurController
+		if (dinosaurController != null)
+		{
+			dinosaurController.Die();
+		}
+
+		// 💀 Activar panel de muerte
+		if (deathPanel != null)
+		{
+			deathPanel.SetActive(true);
+		}
+
         // Efecto de muerte
         if (deathEffect != null)
         {
             Instantiate(deathEffect, transform.position, Quaternion.identity);
         }
-        
+
         // Sonido de muerte
         if (deathSounds != null && deathSounds.Length > 0 && audioSource != null)
         {
             AudioClip deathClip = deathSounds[Random.Range(0, deathSounds.Length)];
             audioSource.PlayOneShot(deathClip);
         }
-        
+
         // Ocultar barra de vida
         if (healthBarCanvas != null)
         {
             healthBarCanvas.gameObject.SetActive(false);
         }
-        
-        // Destruir objeto
+
+        // Destruir objeto (solo si está activado)
         if (destroyOnDeath)
         {
             Destroy(gameObject, destroyDelay);
