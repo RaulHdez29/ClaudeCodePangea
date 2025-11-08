@@ -1711,22 +1711,25 @@ void UpdateTimers()
 
 		foreach (Collider col in foodColliders)
 		{
-			if (col.CompareTag("Food"))
+			if (col.gameObject.CompareTag("Food"))
 			{
 				nearbyFood = col.gameObject;
+				Debug.Log($"🍖 Comida detectada: {col.gameObject.name}");
 				break;
 			}
 		}
 
-		// 💧 Detectar agua cercana
+		// 💧 Detectar agua cercana (tag "Water", no confundir con waterLayer para nadar)
 		Collider[] waterColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
 		nearbyWater = null;
 
 		foreach (Collider col in waterColliders)
 		{
-			if (col.CompareTag("Water"))
+			// Verificar que tenga el tag "Water" (para beber)
+			if (col.gameObject.CompareTag("Water"))
 			{
 				nearbyWater = col.gameObject;
+				Debug.Log($"💧 Agua (para beber) detectada: {col.gameObject.name}");
 				break;
 			}
 		}
@@ -1734,12 +1737,24 @@ void UpdateTimers()
 		// 🖼️ Mostrar/ocultar botones según proximidad
 		if (eatButton != null)
 		{
-			eatButton.gameObject.SetActive(nearbyFood != null && !isDrinking);
+			bool shouldShowEat = nearbyFood != null && !isDrinking;
+			eatButton.gameObject.SetActive(shouldShowEat);
+
+			if (shouldShowEat && !eatButton.gameObject.activeSelf)
+			{
+				Debug.Log("✅ Mostrando botón de comer");
+			}
 		}
 
 		if (drinkButton != null)
 		{
-			drinkButton.gameObject.SetActive(nearbyWater != null && !isEating);
+			bool shouldShowDrink = nearbyWater != null && !isEating;
+			drinkButton.gameObject.SetActive(shouldShowDrink);
+
+			if (shouldShowDrink && !drinkButton.gameObject.activeSelf)
+			{
+				Debug.Log("✅ Mostrando botón de beber");
+			}
 		}
 	}
 
