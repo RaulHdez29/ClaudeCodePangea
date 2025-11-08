@@ -17,6 +17,7 @@ public class SimpleDinosaurController : MonoBehaviour
     [Header("Controles Táctiles")]
     public VariableJoystick movementJoystick;
     public Button runButton;
+    public Button crouchButton;
     public Button callButton;
     public Button jumpButton;
     public Button attackButton;
@@ -41,6 +42,7 @@ public class SimpleDinosaurController : MonoBehaviour
     [Header("Velocidades")]
     public float walkSpeed = 2f;
     public float runSpeed = 5f;
+    public float crouchSpeed = 1f;
     public float turnSpeed = 120f;
     
     [Header("🔄 CONFIGURACIÓN DE RADIO DE GIRO - MEJORADO")]
@@ -48,6 +50,8 @@ public class SimpleDinosaurController : MonoBehaviour
     public float walkTurnRadius = 1.5f;
     [Tooltip("Radio mínimo de giro al correr")]
     public float runTurnRadius = 3f;
+    [Tooltip("Radio mínimo de giro en crouch")]
+    public float crouchTurnRadius = 1.2f;
     [Tooltip("Suavizado del giro (más alto = más suave)")]
     [Range(1f, 10f)]
     public float turnSmoothness = 5f;
@@ -141,10 +145,14 @@ public class SimpleDinosaurController : MonoBehaviour
     public AudioClip[] hitSounds;
 	
 	[Header("🎤 Call / Roar Settings")]
-	[Tooltip("Duración del rugido (segundos)")]
+	[Tooltip("Duración del rugido (segundos) - DEPRECATED: Usa CallSystem en su lugar")]
 	public float callDuration = 2.5f; // ajusta según la duración de tu animación
 	private bool isCalling = false;
 	private float callTimer = 0f;
+
+	[Header("📞 Sistema de Llamados Mejorado")]
+	[Tooltip("Referencia al sistema de llamados (CallSystem) - opcional")]
+	public CallSystem callSystem;
 
 	[Header("🍖 Sistema de Hambre, Sed y Estamina")]
 	[Tooltip("Hambre máxima")]
@@ -270,11 +278,12 @@ public class SimpleDinosaurController : MonoBehaviour
         Idle = 0,
         Walk = 1,
         Run = 2,
-        Jump = 3,
-        Falling = 4,
-        Attacking = 5,
-        Swimming = 6,
-        IdleSwim = 7
+        Crouch = 3,
+        Jump = 4,
+        Falling = 5,
+        Attacking = 6,
+        Swimming = 7,
+        IdleSwim = 8
     }
 
     public enum TurnState
@@ -288,6 +297,7 @@ public class SimpleDinosaurController : MonoBehaviour
     public MovementState currentState = MovementState.Idle;
     public TurnState currentTurnState = TurnState.Idle;
     public bool isRunning = false;
+    public bool isCrouching = false;
     public bool isOnSlope = false;
     public float currentSlopeAngle = 0f;
     public bool isAttacking = false;
@@ -396,13 +406,33 @@ public class SimpleDinosaurController : MonoBehaviour
         if (runButton != null)
         {
             runButton.onClick.RemoveAllListeners();
-            runButton.onClick.AddListener(() => isRunning = !isRunning);
+            runButton.onClick.AddListener(() => {
+                if (!isCrouching) {
+                    isRunning = !isRunning;
+                }
+            });
+        }
+
+        if (crouchButton != null)
+        {
+            crouchButton.onClick.RemoveAllListeners();
+            crouchButton.onClick.AddListener(() => {
+                isCrouching = !isCrouching;
+                if (isCrouching) {
+                    isRunning = false; // No se puede correr mientras está agachado
+                }
+            });
         }
 
         if (callButton != null)
         {
             callButton.onClick.RemoveAllListeners();
-            callButton.onClick.AddListener(PlayCallSound);
+            // Si hay CallSystem configurado, no hacer nada aquí (CallSystem maneja el botón)
+            // Si no hay CallSystem, usar la función antigua
+            if (callSystem == null)
+            {
+                callButton.onClick.AddListener(PlayCallSound);
+            }
         }
 
         if (jumpButton != null)
@@ -473,6 +503,7 @@ public class SimpleDinosaurController : MonoBehaviour
         // Velocidades
         walkSpeed = modelHeight * 1.2f;
         runSpeed = modelHeight * 2.5f;
+        crouchSpeed = modelHeight * 0.6f;
         swimSpeed = modelHeight * 1.2f;
         turnSpeed = 180f;
 
@@ -497,6 +528,7 @@ public class SimpleDinosaurController : MonoBehaviour
         // Giro
         walkTurnRadius = 1.0f;
         runTurnRadius = 2.0f;
+        crouchTurnRadius = 0.8f;
         maxRotationSpeed = 200f;
     }
 
@@ -505,6 +537,7 @@ public class SimpleDinosaurController : MonoBehaviour
         // Velocidades
         walkSpeed = modelHeight * 1.0f;
         runSpeed = modelHeight * 2.2f;
+        crouchSpeed = modelHeight * 0.5f;
         swimSpeed = modelHeight * 1.2f;
         turnSpeed = 120f;
 
@@ -529,6 +562,7 @@ public class SimpleDinosaurController : MonoBehaviour
         // Giro
         walkTurnRadius = 1.5f;
         runTurnRadius = 3.0f;
+        crouchTurnRadius = 1.2f;
         maxRotationSpeed = 180f;
     }
 
@@ -537,6 +571,7 @@ public class SimpleDinosaurController : MonoBehaviour
         // Velocidades
         walkSpeed = modelHeight * 0.7f;
         runSpeed = modelHeight * 1.6f;
+        crouchSpeed = modelHeight * 0.35f;
         swimSpeed = modelHeight * 0.9f;
         turnSpeed = 90f;
 
@@ -561,6 +596,7 @@ public class SimpleDinosaurController : MonoBehaviour
         // Giro
         walkTurnRadius = 2.5f;
         runTurnRadius = 5.0f;
+        crouchTurnRadius = 2.0f;
         maxRotationSpeed = 120f;
     }
 
@@ -577,6 +613,12 @@ public class SimpleDinosaurController : MonoBehaviour
 			targetSpeed = 0f;
 			isRunning = false;
 			return;
+		}
+
+		// 📞 Verificar si el CallSystem está activo y llamando
+		if (callSystem != null && callSystem.IsCalling())
+		{
+			isCalling = true;
 		}
 
         // Leer input del joystick
@@ -728,7 +770,15 @@ public class SimpleDinosaurController : MonoBehaviour
             }
             else
             {
-                targetSpeed = isRunning ? runSpeed : walkSpeed;
+                // Determinar velocidad según el estado: crouch, run o walk
+                if (isCrouching)
+                {
+                    targetSpeed = crouchSpeed;
+                }
+                else
+                {
+                    targetSpeed = isRunning ? runSpeed : walkSpeed;
+                }
             }
 
             // Reducir velocidad durante el giro (no aplica en agua)
@@ -787,8 +837,15 @@ void ApplySeparatedRotation()
                 float targetYaw = Mathf.Atan2(targetMoveDirection.x, targetMoveDirection.z) * Mathf.Rad2Deg;
                 float angleDifference = Mathf.DeltaAngle(currentYaw, targetYaw);
 
-                // Radio dinámico de giro (según velocidad)
-                currentTurnRadius = isRunning ? runTurnRadius : walkTurnRadius;
+                // Radio dinámico de giro (según velocidad y estado)
+                if (isCrouching)
+                {
+                    currentTurnRadius = crouchTurnRadius;
+                }
+                else
+                {
+                    currentTurnRadius = isRunning ? runTurnRadius : walkTurnRadius;
+                }
 
                 // Calcular velocidad de rotación
                 float rotationStep = Mathf.Clamp(angleDifference, -maxRotationSpeed * Time.deltaTime, maxRotationSpeed * Time.deltaTime);
@@ -1000,6 +1057,7 @@ void UpdateAnimations()
     // 🔹 2. Estados principales
     animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
     animator.SetBool("IsRunning", isRunning && !isInWater);
+    animator.SetBool("IsCrouching", isCrouching && !isInWater);
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
 
@@ -1374,7 +1432,15 @@ void UpdateTimers()
         }
         else if (currentSpeed > movementThreshold)
         {
-            currentState = isRunning ? MovementState.Run : MovementState.Walk;
+            // Determinar el estado según crouch, run o walk
+            if (isCrouching)
+            {
+                currentState = MovementState.Crouch;
+            }
+            else
+            {
+                currentState = isRunning ? MovementState.Run : MovementState.Walk;
+            }
         }
         else
         {
@@ -1389,6 +1455,15 @@ void UpdateTimers()
             ColorBlock colors = runButton.colors;
             colors.normalColor = isRunning ? Color.green : Color.white;
             runButton.colors = colors;
+            // Deshabilitar botón de correr si está agachado
+            runButton.interactable = !isCrouching;
+        }
+
+        if (crouchButton != null)
+        {
+            ColorBlock colors = crouchButton.colors;
+            colors.normalColor = isCrouching ? Color.yellow : Color.white;
+            crouchButton.colors = colors;
         }
 
         // ✅ DESHABILITAR BOTÓN DE SALTO cuando no se puede usar
