@@ -264,20 +264,6 @@ public class HealthSystem : MonoBehaviour
         if (healthBar != null)
         {
             healthBar.fillAmount = currentHealth / maxHealth;
-            
-            // Cambiar color según porcentaje de vida
-            if (currentHealth / maxHealth > 0.6f)
-            {
-                healthBar.color = Color.green;
-            }
-            else if (currentHealth / maxHealth > 0.3f)
-            {
-                healthBar.color = Color.yellow;
-            }
-            else
-            {
-                healthBar.color = Color.red;
-            }
         }
     }
     

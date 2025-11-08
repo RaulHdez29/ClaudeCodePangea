@@ -191,6 +191,14 @@ public class SimpleDinosaurController : MonoBehaviour
 	[Tooltip("Botón para beber (aparece cerca de agua)")]
 	public Button drinkButton;
 
+	[Header("📊 Barras UI de Estadísticas")]
+	[Tooltip("Barra de hambre (Image tipo Filled)")]
+	public Image hungerBar;
+	[Tooltip("Barra de sed (Image tipo Filled)")]
+	public Image thirstBar;
+	[Tooltip("Barra de estamina (Image tipo Filled)")]
+	public Image staminaBar;
+
 	// Estados de comer/beber
 	private bool isEating = false;
 	private bool isDrinking = false;
@@ -616,6 +624,9 @@ public class SimpleDinosaurController : MonoBehaviour
 
         // Actualizar UI
         UpdateUI();
+
+		// 📊 Actualizar barras de estadísticas
+		UpdateStatsUI();
     }
     
     void GetInput()
@@ -1918,6 +1929,34 @@ void UpdateTimers()
 	public bool IsEatingOrDrinking()
 	{
 		return isEating || isDrinking;
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 📊 SISTEMA DE BARRAS UI
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza las barras UI de hambre, sed y estamina
+	/// </summary>
+	void UpdateStatsUI()
+	{
+		// Actualizar barra de hambre
+		if (hungerBar != null)
+		{
+			hungerBar.fillAmount = currentHunger / maxHunger;
+		}
+
+		// Actualizar barra de sed
+		if (thirstBar != null)
+		{
+			thirstBar.fillAmount = currentThirst / maxThirst;
+		}
+
+		// Actualizar barra de estamina
+		if (staminaBar != null)
+		{
+			staminaBar.fillAmount = currentStamina / maxStamina;
+		}
 	}
 
 	// ═══════════════════════════════════════════════════════════
