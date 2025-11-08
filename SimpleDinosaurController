@@ -252,7 +252,7 @@ public class SimpleDinosaurController : MonoBehaviour
 
     // 😴 Variables de estado de sueño
     public SleepState currentSleepState = SleepState.Awake;
-    private bool isSleeping = false;
+    public bool IsSleeping => currentSleepState != SleepState.Awake; // Property calculada (elimina redundancia)
     private float sleepStateTimer = 0f;
 
     // Character Controller
@@ -567,7 +567,7 @@ public class SimpleDinosaurController : MonoBehaviour
     void GetInput()
     {
         // 😴 No leer input si está durmiendo
-        if (isSleeping)
+        if (IsSleeping)
         {
             inputVector = Vector3.zero;
             return;
@@ -921,7 +921,7 @@ void UpdateAnimations()
     animator.SetBool("IsSwimming", isSwimming);
 
     // 😴 PARÁMETROS DE SUEÑO
-    animator.SetBool("IsSleeping", isSleeping);
+    animator.SetBool("IsSleeping", IsSleeping);
     animator.SetInteger("SleepState", (int)currentSleepState);
 
     // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
@@ -1109,7 +1109,7 @@ void UpdateAnimations()
     public void TryAttack()
     {
 		if (isCalling) return;
-		if (isSleeping) return; // 😴 No atacar mientras duerme
+		if (IsSleeping) return; // 😴 No atacar mientras duerme
 
         // ✅ Usar variable unificada lastGroundedTime
         bool canAttackNow = (controller.isGrounded || Time.time - lastGroundedTime < groundedTolerance || canAttackInAir)
@@ -1208,7 +1208,7 @@ void UpdateAnimations()
     
 	public void TryJump()
 	{
-		if (isSleeping) return; // 😴 No saltar mientras duerme
+		if (IsSleeping) return; // 😴 No saltar mientras duerme
 
 		// ✅ FIX: Usar lastGroundedTime con tolerancia para evitar timing issues
 		// El botón ya está deshabilitado correctamente en la UI
@@ -1258,13 +1258,9 @@ public void ToggleSleep()
             currentSleepState = SleepState.EnteringSleep;
             currentState = MovementState.SleepEnter;
             sleepStateTimer = sleepEnterDuration;
-            isSleeping = true;
 
             if (animator != null)
-            {
                 animator.SetTrigger("SleepEnter");
-                animator.SetBool("IsSleeping", true);
-            }
 
             Debug.Log("😴 Entrando a dormir...");
             break;
@@ -1292,40 +1288,27 @@ public void ToggleSleep()
 
 private void UpdateSleepSystem()
 {
-    if (currentSleepState == SleepState.Awake)
-        return;
+    // Early returns para mejor rendimiento
+    if (currentSleepState == SleepState.Awake) return;
+    if (sleepStateTimer <= 0f) return;
 
-    // Actualizar timer de transición
-    if (sleepStateTimer > 0f)
+    sleepStateTimer -= Time.deltaTime;
+
+    if (sleepStateTimer > 0f) return; // Todavía en transición
+
+    // Transición completada
+    switch (currentSleepState)
     {
-        sleepStateTimer -= Time.deltaTime;
+        case SleepState.EnteringSleep:
+            currentSleepState = SleepState.Sleeping;
+            currentState = MovementState.Sleeping;
+            Debug.Log("💤 Durmiendo profundamente...");
+            break;
 
-        if (sleepStateTimer <= 0f)
-        {
-            // Transición completada
-            switch (currentSleepState)
-            {
-                case SleepState.EnteringSleep:
-                    // Transición completa, ahora está completamente dormido
-                    currentSleepState = SleepState.Sleeping;
-                    currentState = MovementState.Sleeping;
-                    Debug.Log("💤 Durmiendo profundamente...");
-                    break;
-
-                case SleepState.ExitingSleep:
-                    // Transición completa, ahora está despierto
-                    currentSleepState = SleepState.Awake;
-                    isSleeping = false;
-
-                    if (animator != null)
-                    {
-                        animator.SetBool("IsSleeping", false);
-                    }
-
-                    Debug.Log("✅ Completamente despierto!");
-                    break;
-            }
-        }
+        case SleepState.ExitingSleep:
+            currentSleepState = SleepState.Awake;
+            Debug.Log("✅ Completamente despierto!");
+            break;
     }
 }
 
@@ -1367,7 +1350,7 @@ void UpdateTimers()
     void UpdateState()
     {
         // 😴 Estados de sueño tienen máxima prioridad
-        if (isSleeping)
+        if (IsSleeping)
         {
             // El estado ya está configurado en ToggleSleep() y UpdateSleepSystem()
             // No cambiar el estado mientras está durmiendo
@@ -1479,7 +1462,7 @@ void UpdateTimers()
 	{
 		// Si ya está rugiendo o atacando, no permitir otro rugido
 		if (isCalling || isAttacking) return;
-		if (isSleeping) return; // 😴 No rugir mientras duerme
+		if (IsSleeping) return; // 😴 No rugir mientras duerme
 
 		// Activar rugido
 		isCalling = true;
