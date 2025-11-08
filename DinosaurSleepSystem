@@ -192,6 +192,9 @@ public class DinosaurSleepSystem : MonoBehaviour
         }
         else if (SleepState == STATE_SLEEPING)
         {
+            // ⚡ Regenerar estamina mientras duerme (más rápido)
+            RegenerateStaminaWhileSleeping();
+
             // Actualizar botón también cuando está durmiendo (para cooldown)
             if (sleepButton != null)
             {
@@ -287,7 +290,21 @@ public class DinosaurSleepSystem : MonoBehaviour
 
         canSleepNow = isStopped && notInWater && !isInCooldown && !isEatingOrDrinking;
     }
-    
+
+    /// <summary>
+    /// Regenera estamina mientras el dinosaurio está durmiendo
+    /// </summary>
+    void RegenerateStaminaWhileSleeping()
+    {
+        if (dinosaurController == null) return;
+
+        // ⚡ Regenerar estamina usando la tasa de regeneración durante el sueño
+        dinosaurController.currentStamina += dinosaurController.staminaSleepRegenRate * Time.deltaTime;
+
+        // Limitar al máximo
+        dinosaurController.currentStamina = Mathf.Clamp(dinosaurController.currentStamina, 0f, dinosaurController.maxStamina);
+    }
+
     /// <summary>
     /// Actualiza el estado visual del botón de dormir (OPTIMIZADO)
     /// </summary>
