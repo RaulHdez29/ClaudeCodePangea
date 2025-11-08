@@ -205,6 +205,9 @@ public class SimpleDinosaurController : MonoBehaviour
 	private GameObject nearbyFood = null;
 	private GameObject nearbyWater = null;
 
+	// Referencia cacheada al sistema de sueño
+	private DinosaurSleepSystem sleepSystemCache;
+
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
     public bool enableStaticTurn = true;
@@ -381,6 +384,9 @@ public class SimpleDinosaurController : MonoBehaviour
         {
             ApplySizePreset();
         }
+
+		// ⚡ Cachear referencia al sistema de sueño
+		sleepSystemCache = GetComponent<DinosaurSleepSystem>();
 
         SetupButtonListeners();
     }
@@ -1681,9 +1687,10 @@ void UpdateTimers()
 		// ⚡ Estamina - Regeneración
 		else if (!isRunning && !isEating && !isDrinking)
 		{
-			// Verificar si está durmiendo para regenerar más rápido
-			DinosaurSleepSystem sleepSystem = GetComponent<DinosaurSleepSystem>();
-			float regenRate = (sleepSystem != null && sleepSystem.IsSleeping) ? staminaSleepRegenRate : staminaRegenRate;
+			// Verificar si está durmiendo para regenerar más rápido (usando referencia cacheada)
+			// NOTA: Cuando está durmiendo, el DinosaurSleepSystem maneja la regeneración directamente
+			// porque este script se desactiva durante el sueño
+			float regenRate = (sleepSystemCache != null && sleepSystemCache.IsSleeping) ? staminaSleepRegenRate : staminaRegenRate;
 
 			currentStamina += regenRate * Time.deltaTime;
 		}
