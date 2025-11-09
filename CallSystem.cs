@@ -188,6 +188,14 @@ public class CallSystem : MonoBehaviour
             }
         }
 
+        // Cerrar panel automáticamente ANTES de ejecutar el llamado
+        if (autoClosePanel && isPanelOpen && callPanel != null)
+        {
+            callPanel.SetActive(false);
+            isPanelOpen = false;
+            Debug.Log("📞 Panel de llamados cerrado automáticamente");
+        }
+
         // Ejecutar el llamado según el tipo
         switch (callType)
         {
@@ -209,12 +217,6 @@ public class CallSystem : MonoBehaviour
         }
 
         currentCallType = callType;
-
-        // Cerrar panel automáticamente si está configurado
-        if (autoClosePanel && isPanelOpen)
-        {
-            ToggleCallPanel();
-        }
     }
 
     /// <summary>
