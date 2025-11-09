@@ -1416,6 +1416,26 @@ void UpdateTimers()
                 colors.normalColor = Color.white;
             attackButton.colors = colors;
         }
+
+        // ✅ ACTUALIZAR BOTÓN DE CALL - Desactivar mientras está rugiendo
+        if (callButton != null)
+        {
+            // Desactivar el botón mientras está rugiendo
+            callButton.interactable = !isCalling;
+
+            // Cambiar color visual para feedback
+            ColorBlock colors = callButton.colors;
+            if (isCalling)
+            {
+                colors.normalColor = Color.gray;
+                colors.disabledColor = Color.gray;
+            }
+            else
+            {
+                colors.normalColor = Color.white;
+            }
+            callButton.colors = colors;
+        }
     }
     
     // Métodos de audio
