@@ -192,6 +192,9 @@ public class DinosaurSleepSystem : MonoBehaviour
         }
         else if (SleepState == STATE_SLEEPING)
         {
+            // ⚡ Regenerar estamina mientras duerme (más rápido)
+            RegenerateStaminaWhileSleeping();
+
             // Actualizar botón también cuando está durmiendo (para cooldown)
             if (sleepButton != null)
             {
@@ -275,16 +278,50 @@ public class DinosaurSleepSystem : MonoBehaviour
         float animatorSpeed = (animator != null && HasParameter("Speed", AnimatorControllerParameterType.Float))
             ? animator.GetFloat("Speed") : 0f;
 
-        // Validación consolidada: Detenido + No en agua + No en cooldown
+        // 🍖 Verificar si está comiendo o bebiendo
+        bool isEatingOrDrinking = dinosaurController != null && dinosaurController.IsEatingOrDrinking();
+
+        // Validación consolidada: Detenido + No en agua + No en cooldown + No comiendo/bebiendo
         bool isStopped = currentSpeed <= stoppedSpeedThreshold &&
                         currentJoystickInput <= joystickDeadZone &&
                         animatorSpeed <= stoppedSpeedThreshold;
 
         bool notInWater = !preventSleepWhileSwimming || (!isInWater && !isSwimming);
 
-        canSleepNow = isStopped && notInWater && !isInCooldown;
+        canSleepNow = isStopped && notInWater && !isInCooldown && !isEatingOrDrinking;
     }
-    
+
+    /// <summary>
+    /// Regenera estamina mientras el dinosaurio está durmiendo
+    /// </summary>
+    void RegenerateStaminaWhileSleeping()
+    {
+        if (dinosaurController == null) return;
+
+        // ⚡ Regenerar estamina usando la tasa de regeneración durante el sueño
+        dinosaurController.currentStamina += dinosaurController.staminaSleepRegenRate * Time.deltaTime;
+
+        // Limitar al máximo
+        dinosaurController.currentStamina = Mathf.Clamp(dinosaurController.currentStamina, 0f, dinosaurController.maxStamina);
+
+        // 📊 Actualizar la barra de estamina UI en tiempo real
+        UpdateStaminaBar();
+    }
+
+    /// <summary>
+    /// Actualiza la barra de estamina UI (mientras duerme)
+    /// </summary>
+    void UpdateStaminaBar()
+    {
+        if (dinosaurController == null) return;
+
+        // Actualizar solo la barra de estamina (las otras no cambian mientras duerme)
+        if (dinosaurController.staminaBar != null)
+        {
+            dinosaurController.staminaBar.fillAmount = dinosaurController.currentStamina / dinosaurController.maxStamina;
+        }
+    }
+
     /// <summary>
     /// Actualiza el estado visual del botón de dormir (OPTIMIZADO)
     /// </summary>
@@ -311,8 +348,12 @@ public class DinosaurSleepSystem : MonoBehaviour
         {
             if (!canSleepNow)
             {
+                // 🍖 Verificar si está comiendo o bebiendo
+                bool isEatingOrDrinking = dinosaurController != null && dinosaurController.IsEatingOrDrinking();
+
                 // Determinar color según el bloqueo
-                Color disabledColor = isSwimming ? new Color(0f, 0.4f, 1f, 0.6f) :   // Azul oscuro
+                Color disabledColor = isEatingOrDrinking ? new Color(0.8f, 0.5f, 0.2f, 0.6f) :  // Marrón/Naranja (comiendo)
+                                     isSwimming ? new Color(0f, 0.4f, 1f, 0.6f) :   // Azul oscuro
                                      isInWater ? new Color(0.3f, 0.7f, 1f, 0.5f) :    // Azul claro
                                      new Color(1f, 1f, 0f, 0.5f);                      // Amarillo
                 SetButtonState(false, disabledColor);
@@ -485,7 +526,24 @@ public class DinosaurSleepSystem : MonoBehaviour
         UpdateMovementValidation();
         UpdateSwimmingStatus();
         
-        // 1. Verificar agua/natación
+        // 1. Verificar si está comiendo o bebiendo
+        if (dinosaurController != null && dinosaurController.IsEatingOrDrinking())
+        {
+            if (showMovementWarnings)
+            {
+                Debug.LogWarning("🍖 ¡No puede dormir mientras está comiendo o bebiendo!");
+                Debug.LogWarning("💡 Deja de comer/beber primero");
+            }
+
+            PlaySound(cannotSleepSound);
+            StartCoroutine(FlashButton(new Color(0.8f, 0.5f, 0.2f)));
+
+            // Reactivar el botón después del flash (para que pueda intentar de nuevo)
+            StartCoroutine(ReenableButtonAfterDelay(0.6f));
+            return;
+        }
+
+        // 2. Verificar agua/natación
         if (preventSleepWhileSwimming && (isInWater || isSwimming))
         {
             if (showMovementWarnings)
@@ -501,16 +559,16 @@ public class DinosaurSleepSystem : MonoBehaviour
                     Debug.LogWarning("💡 Sal completamente del agua a tierra seca");
                 }
             }
-            
+
             PlaySound(cannotSleepSound);
             StartCoroutine(FlashButton(Color.cyan));
-            
+
             // Reactivar el botón después del flash (para que pueda intentar de nuevo)
             StartCoroutine(ReenableButtonAfterDelay(0.6f));
             return;
         }
-        
-        // 2. Verificar movimiento
+
+        // 3. Verificar movimiento
         if (currentSpeed > stoppedSpeedThreshold || currentJoystickInput > joystickDeadZone)
         {
             if (showMovementWarnings)
@@ -833,6 +891,10 @@ public class DinosaurSleepSystem : MonoBehaviour
                 if (isInCooldown && showCooldownInText)
                 {
                     sleepButtonText.text = $"⏱️ {Mathf.CeilToInt(cooldownTimeRemaining)}s";
+                }
+                else if (dinosaurController != null && dinosaurController.IsEatingOrDrinking())
+                {
+                    sleepButtonText.text = "🍖 Comiendo";
                 }
                 else if (isSwimming)
                 {
