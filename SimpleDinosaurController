@@ -1789,8 +1789,8 @@ void UpdateTimers()
 			}
 		}
 		// ⚡ Estamina - Regeneración (cuando NO está corriendo activamente)
-		// Se regenera si: NO se está moviendo rápido O si no está comiendo/bebiendo
-		else if (currentSpeed <= movementThreshold && !isEating && !isDrinking)
+		// ✅ NUEVO: Regenera al caminar Y cuando está quieto (solo NO regenera al correr)
+		else if (!isEating && !isDrinking)
 		{
 			// Verificar si está durmiendo para regenerar más rápido (usando referencia cacheada)
 			// NOTA: Cuando está durmiendo, el DinosaurSleepSystem también maneja la regeneración
