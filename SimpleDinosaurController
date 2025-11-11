@@ -243,6 +243,10 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("Número de idle variations disponibles (0 = idle normal, 1+ = variations)")]
     [Range(0, 10)]
     public int numberOfIdleVariations = 3;
+    [Tooltip("Duraciones manuales para cada idle variation (índice 0 = variation 1, índice 1 = variation 2, etc.)")]
+    public float[] idleVariationDurations = new float[] { 4f, 3f, 5f };
+    [Tooltip("Nombre del estado del Animator que contiene el Blend Tree de Turn/Look con Idle Variations")]
+    public string idleStateNameInAnimator = "Turn Look";
     [Tooltip("Tiempo mínimo en idle antes de cambiar (segundos)")]
     public float minIdleTimeBeforeVariation = 5f;
     [Tooltip("Tiempo máximo en idle antes de cambiar (segundos)")]
@@ -250,13 +254,6 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("Probabilidad de activar idle variation (0-100%)")]
     [Range(0f, 100f)]
     public float idleVariationChance = 70f;
-    [Tooltip("Duración de cada idle variation (segundos)")]
-    public float idleVariationDuration = 3f;
-    [Tooltip("Detectar duración automáticamente desde el Animator (recomendado)")]
-    public bool autoDetectAnimationDuration = true;
-    [Tooltip("Buffer de seguridad al detectar duración (segundos adicionales para asegurar que termine)")]
-    [Range(0f, 1f)]
-    public float animationDurationBuffer = 0.2f;
     [Tooltip("Permitir idle variations solo cuando completamente quieto")]
     public bool onlyWhenFullyIdle = true;
     [Tooltip("Multiplicador de velocidad de transición al entrar a variation (0.1 = muy lento, 1.0 = normal)")]
@@ -389,13 +386,12 @@ public class SimpleDinosaurController : MonoBehaviour
     private float idleTimer = 0f;
     private float nextIdleVariationTime = 0f;
     private float currentIdleVariation = 0f;  // Cambiado a float para compatibilidad con Animator
+    private int currentIdleVariationIndex = -1;  // Índice actual (0-based) para acceder al array de duraciones
     private bool isPlayingIdleVariation = false;
     private float idleVariationTimer = 0f;
     private float savedTurnBeforeVariation = 0f;  // Guardar Turn antes de variation
     private float savedLookBeforeVariation = 0f;  // Guardar Look antes de variation
     private bool isRestoringTurnLook = false;     // Flag para indicar que está restaurando
-    private float detectedAnimationDuration = 0f; // Duración detectada de la animación actual
-    private bool hasDetectedDuration = false;      // Si ya se detectó la duración
 
     // 🌊 Variables de natación
     private Collider waterCollider = null;
@@ -1287,6 +1283,7 @@ void UpdateAnimations()
             if (currentIdleVariation != 0f)
             {
                 currentIdleVariation = 0f;
+                currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
             }
             return;
@@ -1325,6 +1322,7 @@ void UpdateAnimations()
             if (isPlayingIdleVariation || currentIdleVariation != 0f)
             {
                 currentIdleVariation = 0f;
+                currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
             }
             idleTimer = 0f;
@@ -1338,113 +1336,29 @@ void UpdateAnimations()
             // 🎬 Está reproduciendo una idle variation
             idleVariationTimer += Time.deltaTime;
 
-            // 🎯 Detectar duración automáticamente desde el Animator (solo en los primeros frames)
-            if (autoDetectAnimationDuration && !hasDetectedDuration)
+            // 🎯 Obtener la duración de la animación actual desde el array
+            float currentAnimationDuration = 3f; // Default fallback
+
+            if (currentIdleVariationIndex >= 0 && currentIdleVariationIndex < idleVariationDurations.Length)
             {
-                // Esperar 3 frames para que el Blend Tree haya cambiado completamente
-                if (idleVariationTimer >= 0.05f)  // ~3 frames a 60fps
-                {
-                    if (showIdleVariationDebugLogs)
-                    {
-                        Debug.Log($"🎭 [DEBUG] Intentando detectar duración... (timer: {idleVariationTimer:F2}s, IdleVariation param: {currentIdleVariation})");
-                    }
-
-                    // Intentar obtener duración de las animaciones en el Blend Tree actual
-                    AnimatorClipInfo[] clipInfos = animator.GetCurrentAnimatorClipInfo(0);
-
-                    if (showIdleVariationDebugLogs)
-                    {
-                        Debug.Log($"🎭 [DEBUG] Clips encontrados en layer 0: {clipInfos.Length}");
-                    }
-
-                    if (clipInfos.Length > 0)
-                    {
-                        // Buscar el clip que corresponde a la idle variation actual
-                        float maxDuration = 0f;
-                        string detectedClipName = "";
-
-                        foreach (AnimatorClipInfo clipInfo in clipInfos)
-                        {
-                            if (showIdleVariationDebugLogs)
-                            {
-                                string clipName = clipInfo.clip != null ? clipInfo.clip.name : "NULL";
-                                float weight = clipInfo.weight;
-                                float length = clipInfo.clip != null ? clipInfo.clip.length : 0f;
-                                Debug.Log($"🎭 [DEBUG] → Clip: '{clipName}', Weight: {weight:F3}, Length: {length:F2}s");
-                            }
-
-                            if (clipInfo.clip != null && clipInfo.weight > 0.01f) // Threshold muy bajo
-                            {
-                                float clipDuration = clipInfo.clip.length;
-
-                                // Tomar la animación con mayor peso/duración
-                                if (clipDuration > maxDuration)
-                                {
-                                    maxDuration = clipDuration;
-                                    detectedClipName = clipInfo.clip.name;
-                                }
-                            }
-                        }
-
-                        if (maxDuration > 0f)
-                        {
-                            detectedAnimationDuration = maxDuration + animationDurationBuffer;
-                            hasDetectedDuration = true;
-
-                            Debug.Log($"🎭 ✅ Duración detectada: {maxDuration:F2}s (+{animationDurationBuffer:F2}s buffer = {detectedAnimationDuration:F2}s total) para clip: '{detectedClipName}'");
-                        }
-                        else
-                        {
-                            // Fallback: usar duración manual
-                            detectedAnimationDuration = idleVariationDuration;
-                            hasDetectedDuration = true;
-
-                            Debug.LogWarning($"🎭 ⚠️ WARNING: Ningún clip con weight > 0.01 encontrado. Usando duración manual: {idleVariationDuration}s");
-                        }
-                    }
-                    else
-                    {
-                        // Fallback: usar duración manual
-                        detectedAnimationDuration = idleVariationDuration;
-                        hasDetectedDuration = true;
-
-                        Debug.LogWarning($"🎭 ⚠️ WARNING: No hay clips en el Animator layer 0. Usando duración manual: {idleVariationDuration}s");
-                    }
-                }
-            }
-
-            // Verificar si es tiempo de terminar la variation
-            bool shouldFinishVariation = false;
-
-            if (autoDetectAnimationDuration)
-            {
-                // Esperar a que termine la duración detectada
-                if (hasDetectedDuration && idleVariationTimer >= detectedAnimationDuration)
-                {
-                    shouldFinishVariation = true;
-
-                    if (showIdleVariationDebugLogs)
-                    {
-                        Debug.Log($"🎭 [DEBUG] Animación completada después de {idleVariationTimer:F2}s (esperado: {detectedAnimationDuration:F2}s)");
-                    }
-                }
+                currentAnimationDuration = idleVariationDurations[currentIdleVariationIndex];
             }
             else
             {
-                // Usar duración manual fija
-                if (idleVariationTimer >= idleVariationDuration)
-                {
-                    shouldFinishVariation = true;
-                }
+                Debug.LogWarning($"🎭 ⚠️ WARNING: Índice de idle variation fuera de rango ({currentIdleVariationIndex}). Array tiene {idleVariationDurations.Length} elementos. Usando duración por defecto: 3s");
             }
 
-            // Cuando termina la duración, volver al idle normal
-            if (shouldFinishVariation)
+            // Verificar si es tiempo de terminar la variation
+            if (idleVariationTimer >= currentAnimationDuration)
             {
                 currentIdleVariation = 0f;
+                currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
-                hasDetectedDuration = false; // Reset para la próxima variation
-                detectedAnimationDuration = 0f;
+
+                if (showIdleVariationDebugLogs)
+                {
+                    Debug.Log($"🎭 [DEBUG] Animación completada después de {idleVariationTimer:F2}s (duración configurada: {currentAnimationDuration:F2}s)");
+                }
 
                 // 🔄 Activar restauración de Turn/Look (si había valores guardados)
                 if (Mathf.Abs(savedTurnBeforeVariation) > 0.01f || Mathf.Abs(savedLookBeforeVariation) > 0.01f)
@@ -1488,22 +1402,40 @@ void UpdateAnimations()
                     savedTurnBeforeVariation = currentTurn;
                     savedLookBeforeVariation = currentLook;
 
-                    // ✅ Activar idle variation aleatoria (1.0 a numberOfIdleVariations)
-                    currentIdleVariation = (float)Random.Range(1, numberOfIdleVariations + 1);
+                    // ✅ Seleccionar idle variation aleatoria (1 a numberOfIdleVariations)
+                    int randomVariationNumber = Random.Range(1, numberOfIdleVariations + 1);
+                    currentIdleVariation = (float)randomVariationNumber;
+                    currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
                     isPlayingIdleVariation = true;
                     idleVariationTimer = 0f;
 
-                    // 🎯 Reset de detección de duración para la nueva animación
-                    hasDetectedDuration = false;
-                    detectedAnimationDuration = 0f;
-
-                    if (showIdleVariationDebugLogs)
+                    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
+                    // Esto previene que la animación empiece desde la mitad
+                    if (!string.IsNullOrEmpty(idleStateNameInAnimator))
                     {
-                        Debug.Log($"🎭 ✅ Activando Idle Variation {currentIdleVariation} (Guardado Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2})");
+                        // Play el estado actual con normalizedTime = 0 (frame 0)
+                        animator.Play(idleStateNameInAnimator, 0, 0f);
+
+                        if (showIdleVariationDebugLogs)
+                        {
+                            Debug.Log($"🎭 ✅ Forzando restart del estado '{idleStateNameInAnimator}' desde frame 0");
+                        }
                     }
                     else
                     {
-                        Debug.Log($"🎭 ✅ Activando Idle Variation {currentIdleVariation}");
+                        Debug.LogWarning($"🎭 ⚠️ WARNING: idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Por favor configura el nombre del estado en el Inspector.");
+                    }
+
+                    // Obtener duración para debug
+                    float duration = currentIdleVariationIndex < idleVariationDurations.Length ? idleVariationDurations[currentIdleVariationIndex] : 3f;
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 ✅ Activando Idle Variation #{randomVariationNumber} (índice {currentIdleVariationIndex}, duración: {duration:F2}s) - Guardado Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2}");
+                    }
+                    else
+                    {
+                        Debug.Log($"🎭 ✅ Activando Idle Variation #{randomVariationNumber} (duración: {duration:F2}s)");
                     }
                 }
                 else
