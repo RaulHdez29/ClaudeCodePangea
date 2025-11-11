@@ -1,11 +1,14 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Events;
+using Fusion;
 
-// SISTEMA DE SALUD
-// Agregar a cualquier objeto que pueda recibir daño
+// SISTEMA DE SALUD - ADAPTADO PARA PHOTON FUSION
+// ✅ La vida es local (no sincronizada) pero se puede recibir daño por RPC
+// ✅ Cada jugador ve su propia vida
+// ✅ El daño se envía desde SimpleDinosaurController via RPC
 
-public class HealthSystem : MonoBehaviour
+public class HealthSystem : NetworkBehaviour
 {
     [Header("Configuración de Salud")]
     [Tooltip("Vida máxima (100% = este valor)")]

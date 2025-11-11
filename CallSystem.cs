@@ -1,12 +1,15 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System;
+using Fusion;
 
 /// <summary>
-/// Sistema de llamados/rugidos con panel UI
+/// Sistema de llamados/rugidos con panel UI - ADAPTADO PARA PHOTON FUSION
 /// Permite 4 tipos de llamados configurables: Broadcast, Friendly, Threaten, Scared
+/// ✅ Los rugidos se sincronizan por RPC para que todos los jugadores los vean/escuchen
+/// ✅ Optimizado para reducir tráfico de red
 /// </summary>
-public class CallSystem : MonoBehaviour
+public class CallSystem : NetworkBehaviour
 {
     [Header("📞 Referencias")]
     [Tooltip("Animator del dinosaurio")]
@@ -227,29 +230,54 @@ public class CallSystem : MonoBehaviour
         isCalling = true;
         callTimer = duration;
 
-        // Reproducir sonido
-        if (audioSource != null && sounds != null && sounds.Length > 0)
+        // 🌐 Sincronizar llamado por RPC (para que todos vean/escuchen)
+        if (Object != null && Object.HasStateAuthority)
         {
-            AudioClip clip = sounds[UnityEngine.Random.Range(0, sounds.Length)];
-            audioSource.PlayOneShot(clip);
-        }
-        else
-        {
-            Debug.LogWarning($"⚠️ No hay sonidos configurados para {callName}");
+            // Obtener índice aleatorio de sonido
+            int soundIndex = (sounds != null && sounds.Length > 0) ? UnityEngine.Random.Range(0, sounds.Length) : -1;
+            RPC_TriggerCall(animTrigger, soundIndex, callName);
         }
 
-        // Activar animación
+        Debug.Log($"📞 Llamado {callName} ejecutado");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 RPC - Sincronizar llamado/rugido
+    // ═══════════════════════════════════════════════════════════
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    void RPC_TriggerCall(string animTrigger, int soundIndex, string callName)
+    {
+        // Reproducir sonido (se ejecuta en todos los clientes)
+        if (audioSource != null && soundIndex >= 0)
+        {
+            AudioClip[] sounds = GetSoundsForCallType(callName);
+            if (sounds != null && soundIndex < sounds.Length)
+            {
+                audioSource.PlayOneShot(sounds[soundIndex]);
+            }
+        }
+
+        // Activar animación (se ejecuta en todos los clientes)
         if (animator != null && !string.IsNullOrEmpty(animTrigger))
         {
             animator.ResetTrigger(animTrigger);
             animator.SetTrigger(animTrigger);
         }
-        else
-        {
-            Debug.LogWarning($"⚠️ No hay animación configurada para {callName}");
-        }
+    }
 
-        Debug.Log($"📞 Llamado {callName} ejecutado");
+    /// <summary>
+    /// Obtiene el array de sonidos según el tipo de llamado
+    /// </summary>
+    AudioClip[] GetSoundsForCallType(string callName)
+    {
+        switch (callName)
+        {
+            case "Broadcast": return call1Sounds;
+            case "Friendly": return call2Sounds;
+            case "Threaten": return call3Sounds;
+            case "Scared": return call4Sounds;
+            default: return null;
+        }
     }
 
     /// <summary>

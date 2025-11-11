@@ -4,12 +4,15 @@ using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
-/// Sistema de sueño para el dinosaurio - VERSIÓN OPTIMIZADA
+/// Sistema de sueño para el dinosaurio - OPTIMIZADO PARA PHOTON FUSION
 /// ✅ Solo permite dormir cuando está COMPLETAMENTE DETENIDO
 /// ✅ NO permite dormir mientras nada
 /// ✅ Cooldown de 5 segundos después de presionar el botón
 /// ✅ Feedback visual y advertencias claras
 /// ⚡ OPTIMIZADO: Sin reflexión, código más eficiente (-70 líneas)
+/// 🌐 NOTA: Este sistema es LOCAL (no sincronizado por red)
+/// 🌐 Cada jugador ve solo su propio estado de sueño
+/// 🌐 Los otros jugadores NO ven si estás durmiendo
 /// </summary>
 public class DinosaurSleepSystem : MonoBehaviour
 {

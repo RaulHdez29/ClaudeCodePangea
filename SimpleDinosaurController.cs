@@ -1,13 +1,15 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using Fusion;
 
-// VERSIÓN CORREGIDA - FIX PARA PROBLEMA DE JOYSTICK
-// ✅ Separación correcta de rotación horizontal y alineación con terreno
-// ✅ Sin conflictos de dirección al girar
-// ✅ Movimiento suave y predecible
+// VERSIÓN ADAPTADA PARA PHOTON FUSION
+// ✅ NetworkBehaviour para sincronización de red
+// ✅ Sincronización optimizada de animaciones y ataques
+// ✅ Hambre/sed/estamina solo local (no sincronizadas)
+// ✅ Vida local pero daño por RPC
 
-public class SimpleDinosaurController : MonoBehaviour
+public class SimpleDinosaurController : NetworkBehaviour
 {
     [Header("Referencias")]
     public Animator animator;
@@ -335,6 +337,23 @@ public class SimpleDinosaurController : MonoBehaviour
     public bool isSwimming = false;
     public bool isDead = false;
 
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 PROPIEDADES DE RED (PHOTON FUSION)
+    // ═══════════════════════════════════════════════════════════
+
+    [Networked] public NetworkBool IsAttackingNet { get; set; }
+    [Networked] public NetworkBool IsDeadNet { get; set; }
+    [Networked] public NetworkBool IsCallingNet { get; set; }
+    [Networked] public byte CurrentAnimationState { get; set; } // 0-255 para estados de animación
+    [Networked] public float NetworkSpeed { get; set; }
+    [Networked] public float NetworkMoveX { get; set; }
+    [Networked] public float NetworkMoveZ { get; set; }
+    [Networked] public float NetworkTurn { get; set; }
+    [Networked] public float NetworkLook { get; set; }
+    [Networked] public NetworkBool IsRunningNet { get; set; }
+    [Networked] public NetworkBool IsSwimmingNet { get; set; }
+    [Networked] public TickTimer AttackCooldownTimer { get; set; }
+
     // Character Controller
     private CharacterController controller;
     
@@ -642,84 +661,115 @@ public class SimpleDinosaurController : MonoBehaviour
         maxRotationSpeed = 120f;
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 PHOTON FUSION - FixedUpdateNetwork (simulación de red)
+    // ═══════════════════════════════════════════════════════════
+    public override void FixedUpdateNetwork()
+    {
+        // 💀 Si está muerto, no hacer nada
+        if (isDead || IsDeadNet)
+        {
+            // Detener todo movimiento
+            moveDirection = Vector3.zero;
+            velocity.x = 0f;
+            velocity.z = 0f;
+            currentSpeed = 0f;
+            targetSpeed = 0f;
+            isRunning = false;
+            IsDeadNet = true;
+            return;
+        }
+
+        // 🌐 Solo el propietario (HasInputAuthority) puede controlar el personaje
+        if (HasInputAuthority)
+        {
+            // Leer input del joystick
+            GetInput();
+
+            // 🍖 Actualizar hambre, sed y estamina (SOLO LOCAL)
+            UpdateHungerThirstStamina();
+
+            // 🍗 Detectar comida y agua cercana (SOLO LOCAL)
+            DetectFoodAndWater();
+
+            // Detectar pendientes
+            CheckSlope();
+
+            // Calcular movimiento y rotación
+            CalculateMovement();
+
+            // ⭐ FIX: Aplicar rotación separada
+            ApplySeparatedRotation();
+
+            // Aplicar movimiento
+            ApplyMovement();
+
+            // ⭐ Alinear con el terreno (solo afecta pitch/roll, no yaw)
+            // 🌊 NO alinear cuando está nadando
+            if (alignToTerrain && controller.isGrounded && !isSwimming)
+            {
+                AlignToTerrainFixed();
+            }
+
+            // 🌊 Resetear rotación a horizontal cuando está nadando
+            if (isSwimming)
+            {
+                ResetRotationToHorizontal();
+            }
+
+            // Actualizar sistema de ataque
+            UpdateAttackSystem();
+
+            // Actualizar Turn y Look basado en cámara
+            UpdateCameraBasedTurnAndLook();
+
+            // 🎭 Actualizar sistema de Idle Variations
+            UpdateIdleVariations();
+
+            // Actualizar timers
+            UpdateTimers();
+
+            // Actualizar estado
+            UpdateState();
+
+            // 🌐 Sincronizar variables de red (optimizado, solo cuando cambian)
+            SyncNetworkVariables();
+        }
+        else
+        {
+            // 🌐 Clientes remotos: aplicar valores de red a las animaciones
+            ApplyNetworkVariablesToAnimator();
+        }
+
+        // Actualizar animaciones (se ejecuta en todos los clientes)
+        UpdateAnimations();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 Update para UI y lógica local (no afecta simulación)
+    // ═══════════════════════════════════════════════════════════
     void Update()
     {
-		// 💀 Si está muerto, no hacer nada
-		if (isDead)
-		{
-			// Detener todo movimiento
-			moveDirection = Vector3.zero;
-			velocity.x = 0f;
-			velocity.z = 0f;
-			currentSpeed = 0f;
-			targetSpeed = 0f;
-			isRunning = false;
-			return;
-		}
-
-		// 📞 Verificar si el CallSystem está activo y llamando
-		if (callSystem != null && callSystem.IsCalling())
-		{
-			isCalling = true;
-		}
-
-        // Leer input del joystick
-        GetInput();
-
-		// 🍖 Actualizar hambre, sed y estamina
-		UpdateHungerThirstStamina();
-
-		// 🍗 Detectar comida y agua cercana
-		DetectFoodAndWater();
-
-        // Detectar pendientes
-        CheckSlope();
-
-        // Calcular movimiento y rotación
-        CalculateMovement();
-
-        // ⭐ FIX: Aplicar rotación separada
-        ApplySeparatedRotation();
-
-        // Aplicar movimiento
-        ApplyMovement();
-
-        // ⭐ Alinear con el terreno (solo afecta pitch/roll, no yaw)
-        // 🌊 NO alinear cuando está nadando
-        if (alignToTerrain && controller.isGrounded && !isSwimming)
+        // 📞 Verificar si el CallSystem está activo y llamando (solo local)
+        if (callSystem != null && callSystem.IsCalling())
         {
-            AlignToTerrainFixed();
+            isCalling = true;
+            if (HasInputAuthority)
+            {
+                IsCallingNet = true;
+            }
+        }
+        else if (HasInputAuthority)
+        {
+            IsCallingNet = false;
         }
 
-        // 🌊 Resetear rotación a horizontal cuando está nadando
-        if (isSwimming)
+        // Actualizar UI (solo para el jugador local)
+        if (HasInputAuthority)
         {
-            ResetRotationToHorizontal();
+            UpdateUI();
+            UpdateStatsUI();
         }
-
-        // Actualizar animaciones
-        UpdateAnimations();
-
-        // Actualizar sistema de ataque
-        UpdateAttackSystem();
-
-        // Actualizar Turn y Look basado en cámara
-        UpdateCameraBasedTurnAndLook();
-
-        // 🎭 Actualizar sistema de Idle Variations
-        UpdateIdleVariations();
-
-        // Actualizar timers
-        UpdateTimers();
-
-        // Actualizar estado
-        UpdateState();
-
-        // Actualizar UI
-        UpdateUI();
-
-		// 📊 Actualizar barras de estadísticas
-		UpdateStatsUI();
     }
     
     void GetInput()
@@ -1094,13 +1144,79 @@ void ApplyMovement()
         smoothNormal = Vector3.Lerp(smoothNormal, Vector3.up, Time.deltaTime * terrainAlignmentSpeed);
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 MÉTODOS DE SINCRONIZACIÓN DE RED
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Sincroniza variables locales con propiedades de red (solo el propietario)
+    /// </summary>
+    void SyncNetworkVariables()
+    {
+        // Sincronizar solo cuando hay cambios significativos (optimización)
+        if (Mathf.Abs(NetworkSpeed - currentSpeed / runSpeed) > 0.01f)
+        {
+            NetworkSpeed = currentSpeed / runSpeed;
+        }
+
+        // Sincronizar dirección de movimiento
+        Vector3 localMove = transform.InverseTransformDirection(currentMoveDirection);
+        if (Mathf.Abs(NetworkMoveX - localMove.x) > 0.01f)
+        {
+            NetworkMoveX = localMove.x;
+        }
+        if (Mathf.Abs(NetworkMoveZ - localMove.z) > 0.01f)
+        {
+            NetworkMoveZ = localMove.z;
+        }
+
+        // Sincronizar Turn y Look
+        if (Mathf.Abs(NetworkTurn - currentTurn) > 0.01f)
+        {
+            NetworkTurn = currentTurn;
+        }
+        if (Mathf.Abs(NetworkLook - currentLook) > 0.01f)
+        {
+            NetworkLook = currentLook;
+        }
+
+        // Sincronizar estados booleanos
+        IsRunningNet = isRunning;
+        IsSwimmingNet = isSwimming;
+        IsAttackingNet = isAttacking;
+        IsDeadNet = isDead;
+
+        // Sincronizar estado de animación (byte compacto)
+        CurrentAnimationState = (byte)currentState;
+    }
+
+    /// <summary>
+    /// Aplica variables de red al Animator (clientes remotos)
+    /// </summary>
+    void ApplyNetworkVariablesToAnimator()
+    {
+        if (animator == null) return;
+
+        // Aplicar valores de red suavizados
+        currentSpeed = Mathf.Lerp(currentSpeed, NetworkSpeed * runSpeed, Time.deltaTime * 10f);
+        currentTurn = Mathf.Lerp(currentTurn, NetworkTurn, Time.deltaTime * 10f);
+        currentLook = Mathf.Lerp(currentLook, NetworkLook, Time.deltaTime * 10f);
+
+        // Aplicar estados
+        isRunning = IsRunningNet;
+        isSwimming = IsSwimmingNet;
+        isAttacking = IsAttackingNet;
+        isDead = IsDeadNet;
+        currentState = (MovementState)CurrentAnimationState;
+    }
+
 void UpdateAnimations()
 {
     if (animator == null) return;
 
     // 🌊 PARÁMETROS DE NATACIÓN
     animator.SetBool("IsInWater", isInWater);
-    animator.SetBool("IsSwimming", isSwimming);
+    animator.SetBool("IsSwimming", isSwimming || IsSwimmingNet);
 
     // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
     // 🎭 Si está reproduciendo Idle Variation, forzar Speed a 0 para velocidad normal
@@ -1568,63 +1684,115 @@ void UpdateAnimations()
         attackTimer = attackDuration;
         attackCooldownTimer = attackCooldown;
         currentState = MovementState.Attacking;
-        
+
         // Limpiar lista de enemigos golpeados
         enemiesHit.Clear();
-        
-        // Animación
+
+        // 🌐 Sincronizar ataque por RPC (para que todos vean la animación)
+        if (Object != null && Object.HasStateAuthority)
+        {
+            RPC_TriggerAttackAnimation();
+        }
+
+        // Hacer daño inmediatamente
+        PerformAttackDamage();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 RPC - Sincronizar animación de ataque
+    // ═══════════════════════════════════════════════════════════
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    void RPC_TriggerAttackAnimation()
+    {
+        // Animación (se ejecuta en todos los clientes)
         if (animator != null)
         {
             animator.SetTrigger("Attack");
         }
-        
-        // Sonido
+
+        // Sonido (se ejecuta en todos los clientes)
         PlayAttackSound();
-        
-        // Hacer daño inmediatamente
-        PerformAttackDamage();
     }
     
     void PerformAttackDamage()
     {
         Vector3 attackPosition = attackPoint != null ? attackPoint.position : transform.position + transform.forward * 1f;
-        
+
         // Detectar enemigos en el área de ataque
         Collider[] hitColliders = Physics.OverlapSphere(attackPosition, attackRange, enemyLayer);
-        
+
         foreach (Collider hit in hitColliders)
         {
             if (enemiesHit.Contains(hit.gameObject))
                 continue;
-                
+
             Vector3 directionToTarget = (hit.transform.position - transform.position).normalized;
             float angleToTarget = Vector3.Angle(transform.forward, directionToTarget);
-            
+
             if (angleToTarget <= attackAngle / 2f)
             {
                 enemiesHit.Add(hit.gameObject);
-                
-                // Aplicar daño
-                IDamageable damageable = hit.GetComponent<IDamageable>();
-                if (damageable != null)
+
+                // 🌐 Obtener NetworkObject del objetivo
+                NetworkObject targetNetworkObject = hit.GetComponent<NetworkObject>();
+                if (targetNetworkObject != null && Object != null && Object.HasStateAuthority)
                 {
-                    damageable.TakeDamage(attackDamage);
+                    // 🌐 Enviar daño por RPC (se ejecuta en el cliente propietario del objetivo)
+                    RPC_ApplyDamage(targetNetworkObject, attackDamage, directionToTarget);
                 }
-                
-                // Aplicar knockback
-                if (attackKnockback > 0f)
+                else
                 {
-                    Rigidbody rb = hit.GetComponent<Rigidbody>();
-                    if (rb != null)
+                    // Fallback para NPCs u objetos sin NetworkObject
+                    IDamageable damageable = hit.GetComponent<IDamageable>();
+                    if (damageable != null)
                     {
-                        Vector3 knockbackDirection = directionToTarget;
-                        knockbackDirection.y = 0.3f;
-                        rb.AddForce(knockbackDirection.normalized * attackKnockback, ForceMode.Impulse);
+                        damageable.TakeDamage(attackDamage);
+                    }
+
+                    // Aplicar knockback local
+                    if (attackKnockback > 0f)
+                    {
+                        Rigidbody rb = hit.GetComponent<Rigidbody>();
+                        if (rb != null)
+                        {
+                            Vector3 knockbackDirection = directionToTarget;
+                            knockbackDirection.y = 0.3f;
+                            rb.AddForce(knockbackDirection.normalized * attackKnockback, ForceMode.Impulse);
+                        }
                     }
                 }
-                
-                // Sonido de impacto
+
+                // Sonido de impacto (local)
                 PlayHitSound();
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 RPC - Aplicar daño a un jugador
+    // ═══════════════════════════════════════════════════════════
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    void RPC_ApplyDamage(NetworkObject target, float damage, Vector3 knockbackDirection)
+    {
+        if (target == null) return;
+
+        // Aplicar daño al HealthSystem (se ejecuta en el cliente propietario)
+        HealthSystem healthSystem = target.GetComponent<HealthSystem>();
+        if (healthSystem != null)
+        {
+            healthSystem.TakeDamage(damage);
+        }
+
+        // Aplicar knockback
+        if (attackKnockback > 0f && target.HasInputAuthority)
+        {
+            SimpleDinosaurController targetController = target.GetComponent<SimpleDinosaurController>();
+            if (targetController != null)
+            {
+                // Aplicar fuerza de empuje (solo en el propietario)
+                Vector3 knockback = knockbackDirection;
+                knockback.y = 0.3f;
+                targetController.velocity += knockback.normalized * attackKnockback;
             }
         }
     }
@@ -2383,6 +2551,12 @@ void UpdateTimers()
 
 		Debug.Log("💀 Dinosaurio ha muerto!");
 
+		// 🌐 Sincronizar muerte por RPC (para que todos vean la animación)
+		if (Object != null && Object.HasStateAuthority)
+		{
+			RPC_TriggerDeathAnimation();
+		}
+
 		// Detener todas las corrutinas activas
 		StopAllCoroutines();
 
@@ -2393,7 +2567,23 @@ void UpdateTimers()
 		isRunning = false;
 		isCalling = false;
 
-		// Activar animación de muerte
+		// Desactivar el controlador de movimiento
+		if (controller != null)
+		{
+			controller.enabled = false;
+		}
+
+		// Desactivar este script
+		this.enabled = false;
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 🌐 RPC - Sincronizar animación de muerte
+	// ═══════════════════════════════════════════════════════════
+	[Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+	void RPC_TriggerDeathAnimation()
+	{
+		// Activar animación de muerte (se ejecuta en todos los clientes)
 		if (animator != null)
 		{
 			animator.SetBool("IsDead", true);
@@ -2409,14 +2599,8 @@ void UpdateTimers()
 			animator.SetFloat("MoveZ", 0f);
 		}
 
-		// Desactivar el controlador de movimiento
-		if (controller != null)
-		{
-			controller.enabled = false;
-		}
-
-		// Desactivar este script
-		this.enabled = false;
+		// Marcar como muerto en red
+		IsDeadNet = true;
 	}
 }
 
