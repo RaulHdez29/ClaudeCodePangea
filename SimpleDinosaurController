@@ -254,6 +254,9 @@ public class SimpleDinosaurController : MonoBehaviour
     public float idleVariationDuration = 3f;
     [Tooltip("Detectar duración automáticamente desde el Animator (recomendado)")]
     public bool autoDetectAnimationDuration = true;
+    [Tooltip("Buffer de seguridad al detectar duración (segundos adicionales para asegurar que termine)")]
+    [Range(0f, 1f)]
+    public float animationDurationBuffer = 0.2f;
     [Tooltip("Permitir idle variations solo cuando completamente quieto")]
     public bool onlyWhenFullyIdle = true;
     [Tooltip("Multiplicador de velocidad de transición al entrar a variation (0.1 = muy lento, 1.0 = normal)")]
@@ -1335,41 +1338,85 @@ void UpdateAnimations()
             // 🎬 Está reproduciendo una idle variation
             idleVariationTimer += Time.deltaTime;
 
-            bool shouldFinishVariation = false;
-
-            // 🎯 OPCIÓN 1: Detectar duración automáticamente desde el Animator
-            if (autoDetectAnimationDuration)
+            // 🎯 Detectar duración automáticamente desde el Animator (solo en los primeros frames)
+            if (autoDetectAnimationDuration && !hasDetectedDuration)
             {
-                // Obtener información del estado actual del Animator
-                AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(0);
-
-                // Detectar duración de la animación en el primer frame
-                if (!hasDetectedDuration)
+                // Esperar 3 frames para que el Blend Tree haya cambiado completamente
+                if (idleVariationTimer >= 0.05f)  // ~3 frames a 60fps
                 {
-                    detectedAnimationDuration = stateInfo.length;
-                    hasDetectedDuration = true;
+                    // Intentar obtener duración de las animaciones en el Blend Tree actual
+                    AnimatorClipInfo[] clipInfos = animator.GetCurrentAnimatorClipInfo(0);
 
-                    if (showIdleVariationDebugLogs)
+                    if (clipInfos.Length > 0)
                     {
-                        Debug.Log($"🎭 [DEBUG] Duración detectada: {detectedAnimationDuration:F2}s para Idle Variation {currentIdleVariation}");
+                        // Buscar el clip que corresponde a la idle variation actual
+                        float maxDuration = 0f;
+                        string detectedClipName = "";
+
+                        foreach (AnimatorClipInfo clipInfo in clipInfos)
+                        {
+                            if (clipInfo.clip != null && clipInfo.weight > 0.1f)
+                            {
+                                float clipDuration = clipInfo.clip.length;
+
+                                // Tomar la animación con mayor peso/duración
+                                if (clipDuration > maxDuration)
+                                {
+                                    maxDuration = clipDuration;
+                                    detectedClipName = clipInfo.clip.name;
+                                }
+                            }
+                        }
+
+                        if (maxDuration > 0f)
+                        {
+                            detectedAnimationDuration = maxDuration + animationDurationBuffer;
+                            hasDetectedDuration = true;
+
+                            if (showIdleVariationDebugLogs)
+                            {
+                                Debug.Log($"🎭 [DEBUG] Duración detectada: {maxDuration:F2}s (+{animationDurationBuffer:F2}s buffer = {detectedAnimationDuration:F2}s total) para clip: {detectedClipName}");
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: usar duración manual
+                            detectedAnimationDuration = idleVariationDuration;
+                            hasDetectedDuration = true;
+
+                            Debug.LogWarning($"🎭 [WARNING] No se pudo detectar duración, usando duración manual: {idleVariationDuration}s");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback: usar duración manual
+                        detectedAnimationDuration = idleVariationDuration;
+                        hasDetectedDuration = true;
+
+                        Debug.LogWarning($"🎭 [WARNING] No hay clips en el Animator, usando duración manual: {idleVariationDuration}s");
                     }
                 }
+            }
 
-                // Verificar si la animación ha terminado completamente (normalizedTime >= 1.0)
-                // normalizedTime = 0.0 a 1.0 representa el progreso de la animación
-                if (stateInfo.normalizedTime >= 0.99f && idleVariationTimer >= 0.5f)
+            // Verificar si es tiempo de terminar la variation
+            bool shouldFinishVariation = false;
+
+            if (autoDetectAnimationDuration)
+            {
+                // Esperar a que termine la duración detectada
+                if (hasDetectedDuration && idleVariationTimer >= detectedAnimationDuration)
                 {
                     shouldFinishVariation = true;
 
                     if (showIdleVariationDebugLogs)
                     {
-                        Debug.Log($"🎭 [DEBUG] Animación completada (normalizedTime: {stateInfo.normalizedTime:F2})");
+                        Debug.Log($"🎭 [DEBUG] Animación completada después de {idleVariationTimer:F2}s (esperado: {detectedAnimationDuration:F2}s)");
                     }
                 }
             }
-            // 🎯 OPCIÓN 2: Usar duración manual fija
             else
             {
+                // Usar duración manual fija
                 if (idleVariationTimer >= idleVariationDuration)
                 {
                     shouldFinishVariation = true;
@@ -1382,6 +1429,7 @@ void UpdateAnimations()
                 currentIdleVariation = 0f;
                 isPlayingIdleVariation = false;
                 hasDetectedDuration = false; // Reset para la próxima variation
+                detectedAnimationDuration = 0f;
 
                 // 🔄 Activar restauración de Turn/Look (si había valores guardados)
                 if (Mathf.Abs(savedTurnBeforeVariation) > 0.01f || Mathf.Abs(savedLookBeforeVariation) > 0.01f)
