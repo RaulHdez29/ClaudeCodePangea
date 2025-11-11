@@ -16,12 +16,15 @@ public class DinosaurSleepSystem : MonoBehaviour
     [Header("Referencias")]
     [Tooltip("Referencia al Animator del dinosaurio")]
     public Animator animator;
-    
+
     [Tooltip("Referencia al script del controlador del dinosaurio")]
     public SimpleDinosaurController dinosaurController;
-    
+
     [Tooltip("Referencia al CharacterController (para verificar velocidad)")]
     public CharacterController characterController;
+
+    [Tooltip("Referencia al HealthSystem (para regenerar vida)")]
+    public HealthSystem healthSystem;
     
     [Header("UI - Botón de Sueño")]
     [Tooltip("Botón para activar/desactivar el sueño")]
@@ -64,13 +67,26 @@ public class DinosaurSleepSystem : MonoBehaviour
     [Header("⏰ Configuración de Tiempos")]
     [Tooltip("Duración de la animación de entrar a dormir")]
     public float sleepEnterDuration = 2f;
-    
+
     [Tooltip("Duración de la animación de despertar")]
     public float sleepExitDuration = 2f;
-    
+
     [Tooltip("Tiempo de espera antes de empezar a dormir (para que termine animaciones actuales)")]
     [Range(0f, 1f)]
     public float transitionDelay = 0.2f;
+
+    [Header("❤️ Configuración de Regeneración")]
+    [Tooltip("Activar regeneración de vida al dormir")]
+    public bool regenerateHealthWhileSleeping = true;
+
+    [Tooltip("Velocidad de regeneración de vida por segundo")]
+    public float healthRegenRate = 5f;
+
+    [Tooltip("No regenerar vida si hambre está agotada (0)")]
+    public bool requireHungerForHealthRegen = true;
+
+    [Tooltip("No regenerar vida si sed está agotada (0)")]
+    public bool requireThirstForHealthRegen = true;
     
     [Header("🎵 Audio (Opcional)")]
     [Tooltip("Sonido al empezar a dormir")]
@@ -138,13 +154,16 @@ public class DinosaurSleepSystem : MonoBehaviour
         // Obtener componentes automáticamente si no están asignados
         if (animator == null)
             animator = GetComponent<Animator>();
-            
+
         if (dinosaurController == null)
             dinosaurController = GetComponent<SimpleDinosaurController>();
-            
+
         if (characterController == null)
             characterController = GetComponent<CharacterController>();
-            
+
+        if (healthSystem == null)
+            healthSystem = GetComponent<HealthSystem>();
+
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
         
@@ -192,8 +211,8 @@ public class DinosaurSleepSystem : MonoBehaviour
         }
         else if (SleepState == STATE_SLEEPING)
         {
-            // ⚡ Regenerar estamina mientras duerme (más rápido)
-            RegenerateStaminaWhileSleeping();
+            // ⚡ Regenerar estamina y vida mientras duerme
+            RegenerateWhileSleeping();
 
             // Actualizar botón también cuando está durmiendo (para cooldown)
             if (sleepButton != null)
@@ -292,20 +311,53 @@ public class DinosaurSleepSystem : MonoBehaviour
     }
 
     /// <summary>
-    /// Regenera estamina mientras el dinosaurio está durmiendo
+    /// Regenera estamina y vida mientras el dinosaurio está durmiendo
     /// </summary>
-    void RegenerateStaminaWhileSleeping()
+    void RegenerateWhileSleeping()
     {
         if (dinosaurController == null) return;
 
-        // ⚡ Regenerar estamina usando la tasa de regeneración durante el sueño
+        // ⚡ REGENERAR ESTAMINA usando la tasa de regeneración durante el sueño
         dinosaurController.currentStamina += dinosaurController.staminaSleepRegenRate * Time.deltaTime;
 
         // Limitar al máximo
         dinosaurController.currentStamina = Mathf.Clamp(dinosaurController.currentStamina, 0f, dinosaurController.maxStamina);
 
-        // 📊 Actualizar la barra de estamina UI en tiempo real
+        // ❤️ REGENERAR VIDA (si está activado y cumple requisitos)
+        if (regenerateHealthWhileSleeping && healthSystem != null && !healthSystem.isDead)
+        {
+            // Verificar si cumple los requisitos de hambre y sed
+            bool canRegenerateHealth = true;
+
+            if (requireHungerForHealthRegen)
+            {
+                float currentHunger = dinosaurController.GetCurrentHunger();
+                if (currentHunger <= 0f)
+                {
+                    canRegenerateHealth = false;
+                }
+            }
+
+            if (requireThirstForHealthRegen)
+            {
+                float currentThirst = dinosaurController.GetCurrentThirst();
+                if (currentThirst <= 0f)
+                {
+                    canRegenerateHealth = false;
+                }
+            }
+
+            // Si cumple requisitos, regenerar vida
+            if (canRegenerateHealth)
+            {
+                healthSystem.currentHealth += healthRegenRate * Time.deltaTime;
+                healthSystem.currentHealth = Mathf.Clamp(healthSystem.currentHealth, 0f, healthSystem.maxHealth);
+            }
+        }
+
+        // 📊 Actualizar las barras UI en tiempo real
         UpdateStaminaBar();
+        UpdateHealthBar();
     }
 
     /// <summary>
@@ -315,10 +367,24 @@ public class DinosaurSleepSystem : MonoBehaviour
     {
         if (dinosaurController == null) return;
 
-        // Actualizar solo la barra de estamina (las otras no cambian mientras duerme)
+        // Actualizar solo la barra de estamina
         if (dinosaurController.staminaBar != null)
         {
             dinosaurController.staminaBar.fillAmount = dinosaurController.currentStamina / dinosaurController.maxStamina;
+        }
+    }
+
+    /// <summary>
+    /// Actualiza la barra de vida UI (mientras duerme)
+    /// </summary>
+    void UpdateHealthBar()
+    {
+        if (healthSystem == null) return;
+
+        // Actualizar la barra de vida
+        if (healthSystem.healthBar != null)
+        {
+            healthSystem.healthBar.fillAmount = healthSystem.currentHealth / healthSystem.maxHealth;
         }
     }
 
