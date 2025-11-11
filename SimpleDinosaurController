@@ -252,6 +252,8 @@ public class SimpleDinosaurController : MonoBehaviour
     public float idleVariationChance = 70f;
     [Tooltip("Duración de cada idle variation (segundos)")]
     public float idleVariationDuration = 3f;
+    [Tooltip("Detectar duración automáticamente desde el Animator (recomendado)")]
+    public bool autoDetectAnimationDuration = true;
     [Tooltip("Permitir idle variations solo cuando completamente quieto")]
     public bool onlyWhenFullyIdle = true;
     [Tooltip("Multiplicador de velocidad de transición al entrar a variation (0.1 = muy lento, 1.0 = normal)")]
@@ -389,6 +391,8 @@ public class SimpleDinosaurController : MonoBehaviour
     private float savedTurnBeforeVariation = 0f;  // Guardar Turn antes de variation
     private float savedLookBeforeVariation = 0f;  // Guardar Look antes de variation
     private bool isRestoringTurnLook = false;     // Flag para indicar que está restaurando
+    private float detectedAnimationDuration = 0f; // Duración detectada de la animación actual
+    private bool hasDetectedDuration = false;      // Si ya se detectó la duración
 
     // 🌊 Variables de natación
     private Collider waterCollider = null;
@@ -1331,11 +1335,53 @@ void UpdateAnimations()
             // 🎬 Está reproduciendo una idle variation
             idleVariationTimer += Time.deltaTime;
 
+            bool shouldFinishVariation = false;
+
+            // 🎯 OPCIÓN 1: Detectar duración automáticamente desde el Animator
+            if (autoDetectAnimationDuration)
+            {
+                // Obtener información del estado actual del Animator
+                AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(0);
+
+                // Detectar duración de la animación en el primer frame
+                if (!hasDetectedDuration)
+                {
+                    detectedAnimationDuration = stateInfo.length;
+                    hasDetectedDuration = true;
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 [DEBUG] Duración detectada: {detectedAnimationDuration:F2}s para Idle Variation {currentIdleVariation}");
+                    }
+                }
+
+                // Verificar si la animación ha terminado completamente (normalizedTime >= 1.0)
+                // normalizedTime = 0.0 a 1.0 representa el progreso de la animación
+                if (stateInfo.normalizedTime >= 0.99f && idleVariationTimer >= 0.5f)
+                {
+                    shouldFinishVariation = true;
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 [DEBUG] Animación completada (normalizedTime: {stateInfo.normalizedTime:F2})");
+                    }
+                }
+            }
+            // 🎯 OPCIÓN 2: Usar duración manual fija
+            else
+            {
+                if (idleVariationTimer >= idleVariationDuration)
+                {
+                    shouldFinishVariation = true;
+                }
+            }
+
             // Cuando termina la duración, volver al idle normal
-            if (idleVariationTimer >= idleVariationDuration)
+            if (shouldFinishVariation)
             {
                 currentIdleVariation = 0f;
                 isPlayingIdleVariation = false;
+                hasDetectedDuration = false; // Reset para la próxima variation
 
                 // 🔄 Activar restauración de Turn/Look (si había valores guardados)
                 if (Mathf.Abs(savedTurnBeforeVariation) > 0.01f || Mathf.Abs(savedLookBeforeVariation) > 0.01f)
@@ -1383,6 +1429,10 @@ void UpdateAnimations()
                     currentIdleVariation = (float)Random.Range(1, numberOfIdleVariations + 1);
                     isPlayingIdleVariation = true;
                     idleVariationTimer = 0f;
+
+                    // 🎯 Reset de detección de duración para la nueva animación
+                    hasDetectedDuration = false;
+                    detectedAnimationDuration = 0f;
 
                     if (showIdleVariationDebugLogs)
                     {
