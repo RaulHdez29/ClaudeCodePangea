@@ -1344,8 +1344,18 @@ void UpdateAnimations()
                 // Esperar 3 frames para que el Blend Tree haya cambiado completamente
                 if (idleVariationTimer >= 0.05f)  // ~3 frames a 60fps
                 {
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 [DEBUG] Intentando detectar duración... (timer: {idleVariationTimer:F2}s, IdleVariation param: {currentIdleVariation})");
+                    }
+
                     // Intentar obtener duración de las animaciones en el Blend Tree actual
                     AnimatorClipInfo[] clipInfos = animator.GetCurrentAnimatorClipInfo(0);
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 [DEBUG] Clips encontrados en layer 0: {clipInfos.Length}");
+                    }
 
                     if (clipInfos.Length > 0)
                     {
@@ -1355,7 +1365,15 @@ void UpdateAnimations()
 
                         foreach (AnimatorClipInfo clipInfo in clipInfos)
                         {
-                            if (clipInfo.clip != null && clipInfo.weight > 0.1f)
+                            if (showIdleVariationDebugLogs)
+                            {
+                                string clipName = clipInfo.clip != null ? clipInfo.clip.name : "NULL";
+                                float weight = clipInfo.weight;
+                                float length = clipInfo.clip != null ? clipInfo.clip.length : 0f;
+                                Debug.Log($"🎭 [DEBUG] → Clip: '{clipName}', Weight: {weight:F3}, Length: {length:F2}s");
+                            }
+
+                            if (clipInfo.clip != null && clipInfo.weight > 0.01f) // Threshold muy bajo
                             {
                                 float clipDuration = clipInfo.clip.length;
 
@@ -1373,10 +1391,7 @@ void UpdateAnimations()
                             detectedAnimationDuration = maxDuration + animationDurationBuffer;
                             hasDetectedDuration = true;
 
-                            if (showIdleVariationDebugLogs)
-                            {
-                                Debug.Log($"🎭 [DEBUG] Duración detectada: {maxDuration:F2}s (+{animationDurationBuffer:F2}s buffer = {detectedAnimationDuration:F2}s total) para clip: {detectedClipName}");
-                            }
+                            Debug.Log($"🎭 ✅ Duración detectada: {maxDuration:F2}s (+{animationDurationBuffer:F2}s buffer = {detectedAnimationDuration:F2}s total) para clip: '{detectedClipName}'");
                         }
                         else
                         {
@@ -1384,7 +1399,7 @@ void UpdateAnimations()
                             detectedAnimationDuration = idleVariationDuration;
                             hasDetectedDuration = true;
 
-                            Debug.LogWarning($"🎭 [WARNING] No se pudo detectar duración, usando duración manual: {idleVariationDuration}s");
+                            Debug.LogWarning($"🎭 ⚠️ WARNING: Ningún clip con weight > 0.01 encontrado. Usando duración manual: {idleVariationDuration}s");
                         }
                     }
                     else
@@ -1393,7 +1408,7 @@ void UpdateAnimations()
                         detectedAnimationDuration = idleVariationDuration;
                         hasDetectedDuration = true;
 
-                        Debug.LogWarning($"🎭 [WARNING] No hay clips en el Animator, usando duración manual: {idleVariationDuration}s");
+                        Debug.LogWarning($"🎭 ⚠️ WARNING: No hay clips en el Animator layer 0. Usando duración manual: {idleVariationDuration}s");
                     }
                 }
             }
