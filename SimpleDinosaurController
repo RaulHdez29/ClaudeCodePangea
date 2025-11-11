@@ -236,6 +236,34 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("⭐ Límite máximo de Turn y Look (evita poses estáticas)")]
     [Range(0.5f, 1f)]
     public float maxTurnLookValue = 0.80f;
+
+    [Header("🎭 SISTEMA DE IDLE VARIATIONS")]
+    [Tooltip("Activar cambio automático entre diferentes idles")]
+    public bool enableIdleVariations = true;
+    [Tooltip("Número de idle variations disponibles (0 = idle normal, 1+ = variations)")]
+    [Range(0, 10)]
+    public int numberOfIdleVariations = 3;
+    [Tooltip("Duraciones manuales para cada idle variation (índice 0 = variation 1, índice 1 = variation 2, etc.)")]
+    public float[] idleVariationDurations = new float[] { 4f, 3f, 5f };
+    [Tooltip("Nombre del estado del Animator que contiene el Blend Tree de Turn/Look con Idle Variations")]
+    public string idleStateNameInAnimator = "Turn Look";
+    [Tooltip("Tiempo mínimo en idle antes de cambiar (segundos)")]
+    public float minIdleTimeBeforeVariation = 5f;
+    [Tooltip("Tiempo máximo en idle antes de cambiar (segundos)")]
+    public float maxIdleTimeBeforeVariation = 15f;
+    [Tooltip("Probabilidad de activar idle variation (0-100%)")]
+    [Range(0f, 100f)]
+    public float idleVariationChance = 70f;
+    [Tooltip("Permitir idle variations solo cuando completamente quieto")]
+    public bool onlyWhenFullyIdle = true;
+    [Tooltip("Multiplicador de velocidad de transición al entrar a variation (0.1 = muy lento, 1.0 = normal)")]
+    [Range(0.1f, 1f)]
+    public float variationEnterSpeedMultiplier = 0.5f;
+    [Tooltip("Multiplicador de velocidad de transición al salir de variation (0.1 = muy lento, 1.0 = normal)")]
+    [Range(0.1f, 1f)]
+    public float variationExitSpeedMultiplier = 0.4f;
+    [Tooltip("Mostrar logs de debug en la consola (útil para troubleshooting)")]
+    public bool showIdleVariationDebugLogs = false;
     
     [Header("Configuración de Movimiento")]
     public float turnInPlaceThreshold = 0.1f;
@@ -354,6 +382,17 @@ public class SimpleDinosaurController : MonoBehaviour
     private float lastCameraAngle = 0f;
     private float lastCameraVerticalAngle = 0f;
 
+    // 🎭 Variables de Idle Variations
+    private float idleTimer = 0f;
+    private float nextIdleVariationTime = 0f;
+    private float currentIdleVariation = 0f;  // Cambiado a float para compatibilidad con Animator
+    private int currentIdleVariationIndex = -1;  // Índice actual (0-based) para acceder al array de duraciones
+    private bool isPlayingIdleVariation = false;
+    private float idleVariationTimer = 0f;
+    private float savedTurnBeforeVariation = 0f;  // Guardar Turn antes de variation
+    private float savedLookBeforeVariation = 0f;  // Guardar Look antes de variation
+    private bool isRestoringTurnLook = false;     // Flag para indicar que está restaurando
+
     // 🌊 Variables de natación
     private Collider waterCollider = null;
     private float waterSurfaceY = 0f;
@@ -398,6 +437,9 @@ public class SimpleDinosaurController : MonoBehaviour
 
 		// ⚡ Cachear referencia al sistema de sueño
 		sleepSystemCache = GetComponent<DinosaurSleepSystem>();
+
+        // 🎭 Inicializar sistema de idle variations
+        ResetIdleVariationTimer();
 
         SetupButtonListeners();
     }
@@ -663,6 +705,9 @@ public class SimpleDinosaurController : MonoBehaviour
 
         // Actualizar Turn y Look basado en cámara
         UpdateCameraBasedTurnAndLook();
+
+        // 🎭 Actualizar sistema de Idle Variations
+        UpdateIdleVariations();
 
         // Actualizar timers
         UpdateTimers();
@@ -1058,7 +1103,16 @@ void UpdateAnimations()
     animator.SetBool("IsSwimming", isSwimming);
 
     // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
-    float normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
+    // 🎭 Si está reproduciendo Idle Variation, forzar Speed a 0 para velocidad normal
+    float normalizedSpeed;
+    if (isPlayingIdleVariation)
+    {
+        normalizedSpeed = 0f;  // Forzar a 0 durante idle variation
+    }
+    else
+    {
+        normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
+    }
     animator.SetFloat("Speed", normalizedSpeed);
 
     // 🔹 2. Estados principales
@@ -1070,7 +1124,13 @@ void UpdateAnimations()
 
     // 🔹 3. Parámetros de dirección (si los usas en tu blend tree)
     // ✅ Usar dampTime para suavizar las transiciones
-    if (inputVector.magnitude > 0.1f)
+    // 🎭 Si está reproduciendo Idle Variation, forzar MoveX/MoveZ a 0
+    if (isPlayingIdleVariation)
+    {
+        animator.SetFloat("MoveX", 0f, directionAnimationDampTime, Time.deltaTime);
+        animator.SetFloat("MoveZ", 0f, directionAnimationDampTime, Time.deltaTime);
+    }
+    else if (inputVector.magnitude > 0.1f)
     {
         Vector3 localMove = transform.InverseTransformDirection(currentMoveDirection);
         animator.SetFloat("MoveX", localMove.x, directionAnimationDampTime, Time.deltaTime);
@@ -1087,30 +1147,71 @@ void UpdateAnimations()
     animator.SetFloat("Turn", currentTurn);
     animator.SetFloat("Look", currentLook);
 
+    // 🎭 5. Parámetro de Idle Variation (Float)
+    animator.SetFloat("IdleVariation", currentIdleVariation);
 
 }
 
     
     void UpdateCameraBasedTurnAndLook()
     {
-        if (!enableStaticTurn || cameraTransform == null) 
+        // 🎭 PRIORIDAD 1: Si está reproduciendo Idle Variation, desactivar Turn/Look
+        if (isPlayingIdleVariation)
+        {
+            // Forzar Turn y Look a 0 suavemente (más lento para transición suave)
+            targetTurn = 0f;
+            targetLook = 0f;
+            currentTurnState = TurnState.Idle;
+
+            // Transición SUAVE usando multiplicador configurable
+            float smoothSpeed = turnTransitionSpeed * variationEnterSpeedMultiplier;
+            currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * smoothSpeed);
+            currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * smoothSpeed);
+            return;
+        }
+
+        // 🎭 PRIORIDAD 2: Si está restaurando Turn/Look después de variation
+        if (isRestoringTurnLook)
+        {
+            // Restaurar suavemente a los valores guardados
+            float smoothSpeed = turnTransitionSpeed * variationExitSpeedMultiplier;
+            currentTurn = Mathf.Lerp(currentTurn, savedTurnBeforeVariation, Time.deltaTime * smoothSpeed);
+            currentLook = Mathf.Lerp(currentLook, savedLookBeforeVariation, Time.deltaTime * smoothSpeed);
+
+            // Cuando llegue cerca de los valores guardados, terminar restauración
+            if (Mathf.Abs(currentTurn - savedTurnBeforeVariation) < 0.05f &&
+                Mathf.Abs(currentLook - savedLookBeforeVariation) < 0.05f)
+            {
+                currentTurn = savedTurnBeforeVariation;
+                currentLook = savedLookBeforeVariation;
+                isRestoringTurnLook = false;
+
+                if (showIdleVariationDebugLogs)
+                {
+                    Debug.Log($"🎭 [DEBUG] Restauración de Turn/Look completada");
+                }
+            }
+            return;
+        }
+
+        if (!enableStaticTurn || cameraTransform == null)
         {
             currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * turnTransitionSpeed);
             currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * lookTransitionSpeed);
             return;
         }
-        
+
         // Sistema de Turn basado en la diferencia entre cámara y dinosaurio
         Vector3 cameraForward = cameraTransform.forward;
         cameraForward.y = 0;
         cameraForward.Normalize();
-        
+
         Vector3 dinoForward = transform.forward;
         dinoForward.y = 0;
         dinoForward.Normalize();
-        
+
         float angleToCamera = Vector3.SignedAngle(dinoForward, cameraForward, Vector3.up);
-        
+
         // Determinar el estado de Turn basado en el ángulo
         if (Mathf.Abs(angleToCamera) > turnDetectionThreshold)
         {
@@ -1130,13 +1231,13 @@ void UpdateAnimations()
             targetTurn = 0f;
             currentTurnState = TurnState.Idle;
         }
-        
+
         // Sistema de Look (vertical)
         if (enableVerticalLook)
         {
             float cameraPitch = cameraTransform.eulerAngles.x;
             if (cameraPitch > 180f) cameraPitch -= 360f;
-            
+
             if (Mathf.Abs(cameraPitch) > lookDetectionThreshold)
             {
                 if (cameraPitch < 0) // Mirando hacia arriba
@@ -1157,16 +1258,212 @@ void UpdateAnimations()
         {
             targetLook = 0f;
         }
-        
+
         // Suavizar las transiciones
         currentTurn = Mathf.Lerp(currentTurn, targetTurn, Time.deltaTime * turnTransitionSpeed);
         currentLook = Mathf.Lerp(currentLook, targetLook, Time.deltaTime * lookTransitionSpeed);
-        
+
         // Limitar valores máximos
         currentTurn = Mathf.Clamp(currentTurn, -maxTurnLookValue, maxTurnLookValue);
         currentLook = Mathf.Clamp(currentLook, -maxTurnLookValue, maxTurnLookValue);
     }
     
+    // ═══════════════════════════════════════════════════════════
+    // 🎭 SISTEMA DE IDLE VARIATIONS
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Actualiza el sistema de idle variations (rascarse, mirar alrededor, etc.)
+    /// </summary>
+    void UpdateIdleVariations()
+    {
+        if (!enableIdleVariations || animator == null || numberOfIdleVariations <= 0)
+        {
+            // Si está desactivado, asegurar que esté en idle normal (0)
+            if (currentIdleVariation != 0f)
+            {
+                currentIdleVariation = 0f;
+                currentIdleVariationIndex = -1;
+                isPlayingIdleVariation = false;
+            }
+            return;
+        }
+
+        // 🐛 DEBUG: Log estado inicial (solo cada 60 frames para no spamear)
+        if (showIdleVariationDebugLogs && Time.frameCount % 60 == 0)
+        {
+            Debug.Log($"🎭 [DEBUG] UpdateIdleVariations - State: {currentState}, isPlayingIdleVariation: {isPlayingIdleVariation}, idleTimer: {idleTimer:F1}s");
+        }
+
+        // Verificar si está en estado Idle (completamente quieto)
+        bool isInIdleState = currentState == MovementState.Idle &&
+                            !isAttacking &&
+                            !isCalling &&
+                            !isEating &&
+                            !isDrinking &&
+                            controller.isGrounded &&
+                            !isInWater;
+
+        // Si requiere estar completamente quieto
+        if (onlyWhenFullyIdle)
+        {
+            isInIdleState = isInIdleState &&
+                           currentSpeed <= 0.01f &&
+                           inputVector.magnitude <= 0.01f;
+        }
+
+        // ✅ REMOVIDO: Ya NO verificamos isTurnLookNeutral
+        // Ahora puede activarse aunque esté mirando hacia un lado
+        // Se guardará la posición y se restaurará después
+
+        // Si NO está en idle, resetear sistema
+        if (!isInIdleState)
+        {
+            if (isPlayingIdleVariation || currentIdleVariation != 0f)
+            {
+                currentIdleVariation = 0f;
+                currentIdleVariationIndex = -1;
+                isPlayingIdleVariation = false;
+            }
+            idleTimer = 0f;
+            return;
+        }
+
+        // ✅ Está en Idle - Actualizar lógica
+
+        if (isPlayingIdleVariation)
+        {
+            // 🎬 Está reproduciendo una idle variation
+            idleVariationTimer += Time.deltaTime;
+
+            // 🎯 Obtener la duración de la animación actual desde el array
+            float currentAnimationDuration = 3f; // Default fallback
+
+            if (currentIdleVariationIndex >= 0 && currentIdleVariationIndex < idleVariationDurations.Length)
+            {
+                currentAnimationDuration = idleVariationDurations[currentIdleVariationIndex];
+            }
+            else
+            {
+                Debug.LogWarning($"🎭 ⚠️ WARNING: Índice de idle variation fuera de rango ({currentIdleVariationIndex}). Array tiene {idleVariationDurations.Length} elementos. Usando duración por defecto: 3s");
+            }
+
+            // Verificar si es tiempo de terminar la variation
+            if (idleVariationTimer >= currentAnimationDuration)
+            {
+                currentIdleVariation = 0f;
+                currentIdleVariationIndex = -1;
+                isPlayingIdleVariation = false;
+
+                if (showIdleVariationDebugLogs)
+                {
+                    Debug.Log($"🎭 [DEBUG] Animación completada después de {idleVariationTimer:F2}s (duración configurada: {currentAnimationDuration:F2}s)");
+                }
+
+                // 🔄 Activar restauración de Turn/Look (si había valores guardados)
+                if (Mathf.Abs(savedTurnBeforeVariation) > 0.01f || Mathf.Abs(savedLookBeforeVariation) > 0.01f)
+                {
+                    isRestoringTurnLook = true;
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 [DEBUG] Iniciando restauración de Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2}");
+                    }
+                }
+
+                ResetIdleVariationTimer();
+            }
+        }
+        else
+        {
+            // ⏱️ Está en idle normal - contar tiempo
+            idleTimer += Time.deltaTime;
+
+            // 🐛 DEBUG: Log cada 5 segundos de espera
+            if (showIdleVariationDebugLogs && Mathf.FloorToInt(idleTimer) % 5 == 0 && idleTimer > 0.1f && Time.frameCount % 60 == 0)
+            {
+                Debug.Log($"🎭 [DEBUG] Esperando idle variation... {idleTimer:F1}s / {nextIdleVariationTime:F1}s");
+            }
+
+            // Cuando llega al tiempo objetivo, decidir si activar variation
+            if (idleTimer >= nextIdleVariationTime)
+            {
+                // Tirar dado para ver si activa variation
+                float randomChance = Random.Range(0f, 100f);
+
+                if (showIdleVariationDebugLogs)
+                {
+                    Debug.Log($"🎭 [DEBUG] Intentando activar variation - Chance: {randomChance:F0}% (Req: {idleVariationChance}%)");
+                }
+
+                if (randomChance <= idleVariationChance)
+                {
+                    // 💾 Guardar valores actuales de Turn/Look antes de activar la variation
+                    savedTurnBeforeVariation = currentTurn;
+                    savedLookBeforeVariation = currentLook;
+
+                    // ✅ Seleccionar idle variation aleatoria (1 a numberOfIdleVariations)
+                    int randomVariationNumber = Random.Range(1, numberOfIdleVariations + 1);
+                    currentIdleVariation = (float)randomVariationNumber;
+                    currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
+                    isPlayingIdleVariation = true;
+                    idleVariationTimer = 0f;
+
+                    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
+                    // Esto previene que la animación empiece desde la mitad
+                    if (!string.IsNullOrEmpty(idleStateNameInAnimator))
+                    {
+                        // Play el estado actual con normalizedTime = 0 (frame 0)
+                        animator.Play(idleStateNameInAnimator, 0, 0f);
+
+                        if (showIdleVariationDebugLogs)
+                        {
+                            Debug.Log($"🎭 ✅ Forzando restart del estado '{idleStateNameInAnimator}' desde frame 0");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"🎭 ⚠️ WARNING: idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Por favor configura el nombre del estado en el Inspector.");
+                    }
+
+                    // Obtener duración para debug
+                    float duration = currentIdleVariationIndex < idleVariationDurations.Length ? idleVariationDurations[currentIdleVariationIndex] : 3f;
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 ✅ Activando Idle Variation #{randomVariationNumber} (índice {currentIdleVariationIndex}, duración: {duration:F2}s) - Guardado Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2}");
+                    }
+                    else
+                    {
+                        Debug.Log($"🎭 ✅ Activando Idle Variation #{randomVariationNumber} (duración: {duration:F2}s)");
+                    }
+                }
+                else
+                {
+                    // ❌ No activar, resetear timer para intentar de nuevo
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 ❌ No se activó (mala suerte), intentando de nuevo en {minIdleTimeBeforeVariation}-{maxIdleTimeBeforeVariation}s");
+                    }
+                    ResetIdleVariationTimer();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resetea el timer de idle variations con un tiempo aleatorio
+    /// </summary>
+    void ResetIdleVariationTimer()
+    {
+        idleTimer = 0f;
+        nextIdleVariationTime = Random.Range(minIdleTimeBeforeVariation, maxIdleTimeBeforeVariation);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ⚔️ SISTEMA DE ATAQUE
+    // ═══════════════════════════════════════════════════════════
+
     void UpdateAttackSystem()
     {
         // Detectar enemigos en rango
@@ -1789,8 +2086,8 @@ void UpdateTimers()
 			}
 		}
 		// ⚡ Estamina - Regeneración (cuando NO está corriendo activamente)
-		// Se regenera si: NO se está moviendo rápido O si no está comiendo/bebiendo
-		else if (currentSpeed <= movementThreshold && !isEating && !isDrinking)
+		// ✅ NUEVO: Regenera al caminar Y cuando está quieto (solo NO regenera al correr)
+		else if (!isEating && !isDrinking)
 		{
 			// Verificar si está durmiendo para regenerar más rápido (usando referencia cacheada)
 			// NOTA: Cuando está durmiendo, el DinosaurSleepSystem también maneja la regeneración
