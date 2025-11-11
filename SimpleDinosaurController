@@ -254,6 +254,8 @@ public class SimpleDinosaurController : MonoBehaviour
     public float idleVariationDuration = 3f;
     [Tooltip("Permitir idle variations solo cuando completamente quieto")]
     public bool onlyWhenFullyIdle = true;
+    [Tooltip("Mostrar logs de debug en la consola (útil para troubleshooting)")]
+    public bool showIdleVariationDebugLogs = false;
     
     [Header("Configuración de Movimiento")]
     public float turnInPlaceThreshold = 0.1f;
@@ -1249,6 +1251,12 @@ void UpdateAnimations()
             return;
         }
 
+        // 🐛 DEBUG: Log estado inicial (solo cada 60 frames para no spamear)
+        if (showIdleVariationDebugLogs && Time.frameCount % 60 == 0)
+        {
+            Debug.Log($"🎭 [DEBUG] UpdateIdleVariations - State: {currentState}, isPlayingIdleVariation: {isPlayingIdleVariation}, idleTimer: {idleTimer:F1}s");
+        }
+
         // Verificar si está en estado Idle (completamente quieto)
         bool isInIdleState = currentState == MovementState.Idle &&
                             !isAttacking &&
@@ -1266,10 +1274,17 @@ void UpdateAnimations()
                            inputVector.magnitude <= 0.01f;
         }
 
-        // 🎭 NUEVO: No activar idle variation si está usando Turn/Look (mirando hacia los lados)
+        // 🎭 NUEVO: No activar idle variation si está usando Turn/Look activamente (mirando hacia los lados)
         // Solo permitir cuando está en idle neutral (Turn y Look cerca de 0)
-        bool isTurnLookNeutral = Mathf.Abs(currentTurn) < 0.1f && Mathf.Abs(currentLook) < 0.1f;
+        // Threshold más permisivo: 0.3 (antes era 0.1)
+        bool isTurnLookNeutral = Mathf.Abs(currentTurn) < 0.3f && Mathf.Abs(currentLook) < 0.3f;
         isInIdleState = isInIdleState && isTurnLookNeutral;
+
+        // 🐛 DEBUG: Log cuando no puede activar por Turn/Look
+        if (showIdleVariationDebugLogs && !isTurnLookNeutral && currentState == MovementState.Idle && enableIdleVariations)
+        {
+            Debug.Log($"🎭 [DEBUG] No puede activar Idle Variation - Turn: {currentTurn:F2}, Look: {currentLook:F2}");
+        }
 
         // Si NO está en idle, resetear sistema
         if (!isInIdleState)
@@ -1303,11 +1318,22 @@ void UpdateAnimations()
             // ⏱️ Está en idle normal - contar tiempo
             idleTimer += Time.deltaTime;
 
+            // 🐛 DEBUG: Log cada 5 segundos de espera
+            if (showIdleVariationDebugLogs && Mathf.FloorToInt(idleTimer) % 5 == 0 && idleTimer > 0.1f && Time.frameCount % 60 == 0)
+            {
+                Debug.Log($"🎭 [DEBUG] Esperando idle variation... {idleTimer:F1}s / {nextIdleVariationTime:F1}s");
+            }
+
             // Cuando llega al tiempo objetivo, decidir si activar variation
             if (idleTimer >= nextIdleVariationTime)
             {
                 // Tirar dado para ver si activa variation
                 float randomChance = Random.Range(0f, 100f);
+
+                if (showIdleVariationDebugLogs)
+                {
+                    Debug.Log($"🎭 [DEBUG] Intentando activar variation - Chance: {randomChance:F0}% (Req: {idleVariationChance}%)");
+                }
 
                 if (randomChance <= idleVariationChance)
                 {
@@ -1316,11 +1342,15 @@ void UpdateAnimations()
                     isPlayingIdleVariation = true;
                     idleVariationTimer = 0f;
 
-                    Debug.Log($"🎭 Activando Idle Variation {currentIdleVariation}");
+                    Debug.Log($"🎭 ✅ Activando Idle Variation {currentIdleVariation}");
                 }
                 else
                 {
                     // ❌ No activar, resetear timer para intentar de nuevo
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 ❌ No se activó (mala suerte), intentando de nuevo en {minIdleTimeBeforeVariation}-{maxIdleTimeBeforeVariation}s");
+                    }
                     ResetIdleVariationTimer();
                 }
             }
