@@ -1089,7 +1089,16 @@ void UpdateAnimations()
     animator.SetBool("IsSwimming", isSwimming);
 
     // 🔹 1. Velocidad normalizada (0 = quieto, 1 = corriendo/nadando)
-    float normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
+    // 🎭 Si está reproduciendo Idle Variation, forzar Speed a 0 para velocidad normal
+    float normalizedSpeed;
+    if (isPlayingIdleVariation)
+    {
+        normalizedSpeed = 0f;  // Forzar a 0 durante idle variation
+    }
+    else
+    {
+        normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
+    }
     animator.SetFloat("Speed", normalizedSpeed);
 
     // 🔹 2. Estados principales
@@ -1101,7 +1110,13 @@ void UpdateAnimations()
 
     // 🔹 3. Parámetros de dirección (si los usas en tu blend tree)
     // ✅ Usar dampTime para suavizar las transiciones
-    if (inputVector.magnitude > 0.1f)
+    // 🎭 Si está reproduciendo Idle Variation, forzar MoveX/MoveZ a 0
+    if (isPlayingIdleVariation)
+    {
+        animator.SetFloat("MoveX", 0f, directionAnimationDampTime, Time.deltaTime);
+        animator.SetFloat("MoveZ", 0f, directionAnimationDampTime, Time.deltaTime);
+    }
+    else if (inputVector.magnitude > 0.1f)
     {
         Vector3 localMove = transform.InverseTransformDirection(currentMoveDirection);
         animator.SetFloat("MoveX", localMove.x, directionAnimationDampTime, Time.deltaTime);
@@ -1126,24 +1141,38 @@ void UpdateAnimations()
     
     void UpdateCameraBasedTurnAndLook()
     {
-        if (!enableStaticTurn || cameraTransform == null) 
+        // 🎭 PRIORIDAD: Si está reproduciendo Idle Variation, desactivar Turn/Look
+        if (isPlayingIdleVariation)
+        {
+            // Forzar Turn y Look a 0 suavemente
+            targetTurn = 0f;
+            targetLook = 0f;
+            currentTurnState = TurnState.Idle;
+
+            // Transición suave hacia el centro
+            currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * turnTransitionSpeed);
+            currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * lookTransitionSpeed);
+            return;
+        }
+
+        if (!enableStaticTurn || cameraTransform == null)
         {
             currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * turnTransitionSpeed);
             currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * lookTransitionSpeed);
             return;
         }
-        
+
         // Sistema de Turn basado en la diferencia entre cámara y dinosaurio
         Vector3 cameraForward = cameraTransform.forward;
         cameraForward.y = 0;
         cameraForward.Normalize();
-        
+
         Vector3 dinoForward = transform.forward;
         dinoForward.y = 0;
         dinoForward.Normalize();
-        
+
         float angleToCamera = Vector3.SignedAngle(dinoForward, cameraForward, Vector3.up);
-        
+
         // Determinar el estado de Turn basado en el ángulo
         if (Mathf.Abs(angleToCamera) > turnDetectionThreshold)
         {
@@ -1163,13 +1192,13 @@ void UpdateAnimations()
             targetTurn = 0f;
             currentTurnState = TurnState.Idle;
         }
-        
+
         // Sistema de Look (vertical)
         if (enableVerticalLook)
         {
             float cameraPitch = cameraTransform.eulerAngles.x;
             if (cameraPitch > 180f) cameraPitch -= 360f;
-            
+
             if (Mathf.Abs(cameraPitch) > lookDetectionThreshold)
             {
                 if (cameraPitch < 0) // Mirando hacia arriba
@@ -1190,11 +1219,11 @@ void UpdateAnimations()
         {
             targetLook = 0f;
         }
-        
+
         // Suavizar las transiciones
         currentTurn = Mathf.Lerp(currentTurn, targetTurn, Time.deltaTime * turnTransitionSpeed);
         currentLook = Mathf.Lerp(currentLook, targetLook, Time.deltaTime * lookTransitionSpeed);
-        
+
         // Limitar valores máximos
         currentTurn = Mathf.Clamp(currentTurn, -maxTurnLookValue, maxTurnLookValue);
         currentLook = Mathf.Clamp(currentLook, -maxTurnLookValue, maxTurnLookValue);
@@ -1236,6 +1265,11 @@ void UpdateAnimations()
                            currentSpeed <= 0.01f &&
                            inputVector.magnitude <= 0.01f;
         }
+
+        // 🎭 NUEVO: No activar idle variation si está usando Turn/Look (mirando hacia los lados)
+        // Solo permitir cuando está en idle neutral (Turn y Look cerca de 0)
+        bool isTurnLookNeutral = Mathf.Abs(currentTurn) < 0.1f && Mathf.Abs(currentLook) < 0.1f;
+        isInIdleState = isInIdleState && isTurnLookNeutral;
 
         // Si NO está en idle, resetear sistema
         if (!isInIdleState)
