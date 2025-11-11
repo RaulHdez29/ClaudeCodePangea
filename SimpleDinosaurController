@@ -236,6 +236,24 @@ public class SimpleDinosaurController : MonoBehaviour
     [Tooltip("⭐ Límite máximo de Turn y Look (evita poses estáticas)")]
     [Range(0.5f, 1f)]
     public float maxTurnLookValue = 0.80f;
+
+    [Header("🎭 SISTEMA DE IDLE VARIATIONS")]
+    [Tooltip("Activar cambio automático entre diferentes idles")]
+    public bool enableIdleVariations = true;
+    [Tooltip("Número de idle variations disponibles (0 = idle normal, 1+ = variations)")]
+    [Range(0, 10)]
+    public int numberOfIdleVariations = 3;
+    [Tooltip("Tiempo mínimo en idle antes de cambiar (segundos)")]
+    public float minIdleTimeBeforeVariation = 5f;
+    [Tooltip("Tiempo máximo en idle antes de cambiar (segundos)")]
+    public float maxIdleTimeBeforeVariation = 15f;
+    [Tooltip("Probabilidad de activar idle variation (0-100%)")]
+    [Range(0f, 100f)]
+    public float idleVariationChance = 70f;
+    [Tooltip("Duración de cada idle variation (segundos)")]
+    public float idleVariationDuration = 3f;
+    [Tooltip("Permitir idle variations solo cuando completamente quieto")]
+    public bool onlyWhenFullyIdle = true;
     
     [Header("Configuración de Movimiento")]
     public float turnInPlaceThreshold = 0.1f;
@@ -354,6 +372,13 @@ public class SimpleDinosaurController : MonoBehaviour
     private float lastCameraAngle = 0f;
     private float lastCameraVerticalAngle = 0f;
 
+    // 🎭 Variables de Idle Variations
+    private float idleTimer = 0f;
+    private float nextIdleVariationTime = 0f;
+    private int currentIdleVariation = 0;
+    private bool isPlayingIdleVariation = false;
+    private float idleVariationTimer = 0f;
+
     // 🌊 Variables de natación
     private Collider waterCollider = null;
     private float waterSurfaceY = 0f;
@@ -398,6 +423,9 @@ public class SimpleDinosaurController : MonoBehaviour
 
 		// ⚡ Cachear referencia al sistema de sueño
 		sleepSystemCache = GetComponent<DinosaurSleepSystem>();
+
+        // 🎭 Inicializar sistema de idle variations
+        ResetIdleVariationTimer();
 
         SetupButtonListeners();
     }
@@ -663,6 +691,9 @@ public class SimpleDinosaurController : MonoBehaviour
 
         // Actualizar Turn y Look basado en cámara
         UpdateCameraBasedTurnAndLook();
+
+        // 🎭 Actualizar sistema de Idle Variations
+        UpdateIdleVariations();
 
         // Actualizar timers
         UpdateTimers();
@@ -1087,6 +1118,8 @@ void UpdateAnimations()
     animator.SetFloat("Turn", currentTurn);
     animator.SetFloat("Look", currentLook);
 
+    // 🎭 5. Parámetro de Idle Variation
+    animator.SetInteger("IdleVariation", currentIdleVariation);
 
 }
 
@@ -1167,6 +1200,112 @@ void UpdateAnimations()
         currentLook = Mathf.Clamp(currentLook, -maxTurnLookValue, maxTurnLookValue);
     }
     
+    // ═══════════════════════════════════════════════════════════
+    // 🎭 SISTEMA DE IDLE VARIATIONS
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Actualiza el sistema de idle variations (rascarse, mirar alrededor, etc.)
+    /// </summary>
+    void UpdateIdleVariations()
+    {
+        if (!enableIdleVariations || animator == null || numberOfIdleVariations <= 0)
+        {
+            // Si está desactivado, asegurar que esté en idle normal (0)
+            if (currentIdleVariation != 0)
+            {
+                currentIdleVariation = 0;
+                isPlayingIdleVariation = false;
+            }
+            return;
+        }
+
+        // Verificar si está en estado Idle (completamente quieto)
+        bool isInIdleState = currentState == MovementState.Idle &&
+                            !isAttacking &&
+                            !isCalling &&
+                            !isEating &&
+                            !isDrinking &&
+                            controller.isGrounded &&
+                            !isInWater;
+
+        // Si requiere estar completamente quieto
+        if (onlyWhenFullyIdle)
+        {
+            isInIdleState = isInIdleState &&
+                           currentSpeed <= 0.01f &&
+                           inputVector.magnitude <= 0.01f;
+        }
+
+        // Si NO está en idle, resetear sistema
+        if (!isInIdleState)
+        {
+            if (isPlayingIdleVariation || currentIdleVariation != 0)
+            {
+                currentIdleVariation = 0;
+                isPlayingIdleVariation = false;
+            }
+            idleTimer = 0f;
+            return;
+        }
+
+        // ✅ Está en Idle - Actualizar lógica
+
+        if (isPlayingIdleVariation)
+        {
+            // 🎬 Está reproduciendo una idle variation
+            idleVariationTimer += Time.deltaTime;
+
+            // Cuando termina la duración, volver al idle normal
+            if (idleVariationTimer >= idleVariationDuration)
+            {
+                currentIdleVariation = 0;
+                isPlayingIdleVariation = false;
+                ResetIdleVariationTimer();
+            }
+        }
+        else
+        {
+            // ⏱️ Está en idle normal - contar tiempo
+            idleTimer += Time.deltaTime;
+
+            // Cuando llega al tiempo objetivo, decidir si activar variation
+            if (idleTimer >= nextIdleVariationTime)
+            {
+                // Tirar dado para ver si activa variation
+                float randomChance = Random.Range(0f, 100f);
+
+                if (randomChance <= idleVariationChance)
+                {
+                    // ✅ Activar idle variation aleatoria (1 a numberOfIdleVariations)
+                    currentIdleVariation = Random.Range(1, numberOfIdleVariations + 1);
+                    isPlayingIdleVariation = true;
+                    idleVariationTimer = 0f;
+
+                    Debug.Log($"🎭 Activando Idle Variation {currentIdleVariation}");
+                }
+                else
+                {
+                    // ❌ No activar, resetear timer para intentar de nuevo
+                    ResetIdleVariationTimer();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resetea el timer de idle variations con un tiempo aleatorio
+    /// </summary>
+    void ResetIdleVariationTimer()
+    {
+        idleTimer = 0f;
+        nextIdleVariationTime = Random.Range(minIdleTimeBeforeVariation, maxIdleTimeBeforeVariation);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ⚔️ SISTEMA DE ATAQUE
+    // ═══════════════════════════════════════════════════════════
+
     void UpdateAttackSystem()
     {
         // Detectar enemigos en rango
