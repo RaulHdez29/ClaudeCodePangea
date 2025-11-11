@@ -254,6 +254,12 @@ public class SimpleDinosaurController : MonoBehaviour
     public float idleVariationDuration = 3f;
     [Tooltip("Permitir idle variations solo cuando completamente quieto")]
     public bool onlyWhenFullyIdle = true;
+    [Tooltip("Multiplicador de velocidad de transición al entrar a variation (0.1 = muy lento, 1.0 = normal)")]
+    [Range(0.1f, 1f)]
+    public float variationEnterSpeedMultiplier = 0.5f;
+    [Tooltip("Multiplicador de velocidad de transición al salir de variation (0.1 = muy lento, 1.0 = normal)")]
+    [Range(0.1f, 1f)]
+    public float variationExitSpeedMultiplier = 0.4f;
     [Tooltip("Mostrar logs de debug en la consola (útil para troubleshooting)")]
     public bool showIdleVariationDebugLogs = false;
     
@@ -380,6 +386,9 @@ public class SimpleDinosaurController : MonoBehaviour
     private float currentIdleVariation = 0f;  // Cambiado a float para compatibilidad con Animator
     private bool isPlayingIdleVariation = false;
     private float idleVariationTimer = 0f;
+    private float savedTurnBeforeVariation = 0f;  // Guardar Turn antes de variation
+    private float savedLookBeforeVariation = 0f;  // Guardar Look antes de variation
+    private bool isRestoringTurnLook = false;     // Flag para indicar que está restaurando
 
     // 🌊 Variables de natación
     private Collider waterCollider = null;
@@ -1143,17 +1152,42 @@ void UpdateAnimations()
     
     void UpdateCameraBasedTurnAndLook()
     {
-        // 🎭 PRIORIDAD: Si está reproduciendo Idle Variation, desactivar Turn/Look
+        // 🎭 PRIORIDAD 1: Si está reproduciendo Idle Variation, desactivar Turn/Look
         if (isPlayingIdleVariation)
         {
-            // Forzar Turn y Look a 0 suavemente
+            // Forzar Turn y Look a 0 suavemente (más lento para transición suave)
             targetTurn = 0f;
             targetLook = 0f;
             currentTurnState = TurnState.Idle;
 
-            // Transición suave hacia el centro
-            currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * turnTransitionSpeed);
-            currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * lookTransitionSpeed);
+            // Transición SUAVE usando multiplicador configurable
+            float smoothSpeed = turnTransitionSpeed * variationEnterSpeedMultiplier;
+            currentTurn = Mathf.Lerp(currentTurn, 0f, Time.deltaTime * smoothSpeed);
+            currentLook = Mathf.Lerp(currentLook, 0f, Time.deltaTime * smoothSpeed);
+            return;
+        }
+
+        // 🎭 PRIORIDAD 2: Si está restaurando Turn/Look después de variation
+        if (isRestoringTurnLook)
+        {
+            // Restaurar suavemente a los valores guardados
+            float smoothSpeed = turnTransitionSpeed * variationExitSpeedMultiplier;
+            currentTurn = Mathf.Lerp(currentTurn, savedTurnBeforeVariation, Time.deltaTime * smoothSpeed);
+            currentLook = Mathf.Lerp(currentLook, savedLookBeforeVariation, Time.deltaTime * smoothSpeed);
+
+            // Cuando llegue cerca de los valores guardados, terminar restauración
+            if (Mathf.Abs(currentTurn - savedTurnBeforeVariation) < 0.05f &&
+                Mathf.Abs(currentLook - savedLookBeforeVariation) < 0.05f)
+            {
+                currentTurn = savedTurnBeforeVariation;
+                currentLook = savedLookBeforeVariation;
+                isRestoringTurnLook = false;
+
+                if (showIdleVariationDebugLogs)
+                {
+                    Debug.Log($"🎭 [DEBUG] Restauración de Turn/Look completada");
+                }
+            }
             return;
         }
 
@@ -1274,17 +1308,9 @@ void UpdateAnimations()
                            inputVector.magnitude <= 0.01f;
         }
 
-        // 🎭 NUEVO: No activar idle variation si está usando Turn/Look activamente (mirando hacia los lados)
-        // Solo permitir cuando está en idle neutral (Turn y Look cerca de 0)
-        // Threshold más permisivo: 0.3 (antes era 0.1)
-        bool isTurnLookNeutral = Mathf.Abs(currentTurn) < 0.3f && Mathf.Abs(currentLook) < 0.3f;
-        isInIdleState = isInIdleState && isTurnLookNeutral;
-
-        // 🐛 DEBUG: Log cuando no puede activar por Turn/Look
-        if (showIdleVariationDebugLogs && !isTurnLookNeutral && currentState == MovementState.Idle && enableIdleVariations)
-        {
-            Debug.Log($"🎭 [DEBUG] No puede activar Idle Variation - Turn: {currentTurn:F2}, Look: {currentLook:F2}");
-        }
+        // ✅ REMOVIDO: Ya NO verificamos isTurnLookNeutral
+        // Ahora puede activarse aunque esté mirando hacia un lado
+        // Se guardará la posición y se restaurará después
 
         // Si NO está en idle, resetear sistema
         if (!isInIdleState)
@@ -1310,6 +1336,18 @@ void UpdateAnimations()
             {
                 currentIdleVariation = 0f;
                 isPlayingIdleVariation = false;
+
+                // 🔄 Activar restauración de Turn/Look (si había valores guardados)
+                if (Mathf.Abs(savedTurnBeforeVariation) > 0.01f || Mathf.Abs(savedLookBeforeVariation) > 0.01f)
+                {
+                    isRestoringTurnLook = true;
+
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 [DEBUG] Iniciando restauración de Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2}");
+                    }
+                }
+
                 ResetIdleVariationTimer();
             }
         }
@@ -1337,12 +1375,23 @@ void UpdateAnimations()
 
                 if (randomChance <= idleVariationChance)
                 {
+                    // 💾 Guardar valores actuales de Turn/Look antes de activar la variation
+                    savedTurnBeforeVariation = currentTurn;
+                    savedLookBeforeVariation = currentLook;
+
                     // ✅ Activar idle variation aleatoria (1.0 a numberOfIdleVariations)
                     currentIdleVariation = (float)Random.Range(1, numberOfIdleVariations + 1);
                     isPlayingIdleVariation = true;
                     idleVariationTimer = 0f;
 
-                    Debug.Log($"🎭 ✅ Activando Idle Variation {currentIdleVariation}");
+                    if (showIdleVariationDebugLogs)
+                    {
+                        Debug.Log($"🎭 ✅ Activando Idle Variation {currentIdleVariation} (Guardado Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2})");
+                    }
+                    else
+                    {
+                        Debug.Log($"🎭 ✅ Activando Idle Variation {currentIdleVariation}");
+                    }
                 }
                 else
                 {
