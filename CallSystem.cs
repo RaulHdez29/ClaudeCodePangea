@@ -1,13 +1,19 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System;
+using Photon.Pun;
+using Photon.Realtime;
 
 /// <summary>
 /// Sistema de llamados/rugidos con panel UI
 /// Permite 4 tipos de llamados configurables: Broadcast, Friendly, Threaten, Scared
+/// 🌐 ADAPTADO A PHOTON PUN2 - Sincroniza animaciones y sonidos entre jugadores
 /// </summary>
-public class CallSystem : MonoBehaviour
+public class CallSystem : MonoBehaviourPunCallbacks
 {
+    [Header("🌐 Photon PUN2")]
+    private PhotonView photonView;
+
     [Header("📞 Referencias")]
     [Tooltip("Animator del dinosaurio")]
     public Animator animator;
@@ -76,6 +82,21 @@ public class CallSystem : MonoBehaviour
 
     void Start()
     {
+        // 🌐 Obtener PhotonView
+        photonView = GetComponent<PhotonView>();
+
+        // 🌐 Solo configurar UI para el jugador local
+        if (photonView != null && !photonView.IsMine)
+        {
+            // Desactivar UI de llamados para jugadores remotos
+            if (callPanel != null)
+                callPanel.SetActive(false);
+            if (mainCallButton != null)
+                mainCallButton.gameObject.SetActive(false);
+
+            return; // No configurar listeners para jugadores remotos
+        }
+
         SetupButtonListeners();
 
         // Ocultar panel al inicio
@@ -123,7 +144,7 @@ public class CallSystem : MonoBehaviour
 
     void Update()
     {
-        // Actualizar timer del llamado
+        // Actualizar timer del llamado (todos los clientes)
         if (isCalling)
         {
             callTimer -= Time.deltaTime;
@@ -133,6 +154,10 @@ public class CallSystem : MonoBehaviour
                 EndCall();
             }
         }
+
+        // 🌐 Solo el jugador local actualiza UI
+        if (photonView != null && !photonView.IsMine)
+            return;
 
         // Actualizar estado de los botones
         UpdateButtonStates();
@@ -196,6 +221,24 @@ public class CallSystem : MonoBehaviour
             Debug.Log("📞 Panel de llamados cerrado automáticamente");
         }
 
+        // 🌐 Sincronizar llamado en todos los clientes
+        if (photonView != null)
+        {
+            photonView.RPC("RPC_ExecuteCall", RpcTarget.All, callType);
+        }
+        else
+        {
+            // Sin Photon (modo single player)
+            RPC_ExecuteCall(callType);
+        }
+    }
+
+    /// <summary>
+    /// 🌐 RPC para sincronizar llamado en todos los clientes
+    /// </summary>
+    [PunRPC]
+    void RPC_ExecuteCall(int callType)
+    {
         // Ejecutar el llamado según el tipo
         switch (callType)
         {
