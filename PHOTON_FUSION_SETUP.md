@@ -7,7 +7,7 @@ Todos los scripts han sido adaptados para funcionar con **Photon Fusion**:
 1. **SimpleDinosaurController.cs** - Controlador principal con sincronización de red
 2. **HealthSystem.cs** - Sistema de salud (local pero con RPCs)
 3. **CallSystem.cs** - Sistema de llamados/rugidos sincronizados
-4. **DinosaurSleepSystem.cs** - Sistema de sueño (solo local)
+4. **DinosaurSleepSystem.cs** - Sistema de sueño con animaciones sincronizadas
 
 ---
 
@@ -15,17 +15,18 @@ Todos los scripts han sido adaptados para funcionar con **Photon Fusion**:
 
 ### ✅ Sincronizado (visible para todos los jugadores)
 - **Movimiento y rotación** (posición/rotación del dinosaurio)
-- **Animaciones** (idle, walk, run, swim, attack, death, etc.)
+- **Animaciones** (idle, walk, run, swim, attack, death, sleep, etc.)
 - **Ataques** (animación y daño)
 - **Llamados/rugidos** (animación y sonido)
 - **Estado de muerte** (animación de muerte)
+- **Animaciones de sueño** (dormir y despertar con sonidos)
 
 ### ❌ NO Sincronizado (solo visible para el jugador local)
 - **Hambre** (barra de hambre)
 - **Sed** (barra de sed)
 - **Estamina** (barra de estamina)
 - **Vida** (barra de vida, pero el daño se recibe por RPC)
-- **Sueño** (estado de dormir/despertar)
+- **Regeneración de vida durante el sueño** (solo local)
 - **UI local** (botones, paneles, etc.)
 
 ---
@@ -40,7 +41,7 @@ GameObject (Dinosaurio)
 ├── SimpleDinosaurController (NetworkBehaviour)
 ├── HealthSystem (NetworkBehaviour)
 ├── CallSystem (NetworkBehaviour)
-├── DinosaurSleepSystem (MonoBehaviour - local)
+├── DinosaurSleepSystem (NetworkBehaviour)
 └── CharacterController
 ```
 
@@ -156,6 +157,15 @@ void RPC_ApplyDamage(NetworkObject target, float damage, Vector3 knockbackDirect
 | `IsSwimmingNet` | NetworkBool | Estado de natación |
 | `CurrentAnimationState` | byte | Estado de animación (0-255) |
 
+### DinosaurSleepSystem
+
+| Variable | Tipo | Descripción |
+|----------|------|-------------|
+| `IsSleepingNet` | NetworkBool | Estado de sueño |
+| `SleepStateNet` | byte | Estado de sueño (0=Awake, 1=Entering, 2=Sleeping, 3=Waking) |
+
+**Nota:** La regeneración de vida/estamina durante el sueño es local, pero las animaciones se sincronizan para que todos los jugadores vean cuando alguien está durmiendo.
+
 ---
 
 ## 🐛 Solución de Problemas
@@ -181,15 +191,24 @@ void RPC_ApplyDamage(NetworkObject target, float damage, Vector3 knockbackDirect
 2. Asegúrate de que los `AudioClip[]` tengan sonidos configurados
 3. Revisa que el volumen del `AudioSource` no esté en 0
 
+### Problema: Las animaciones de dormir no se ven en otros jugadores
+
+**Solución:**
+1. Verifica que `DinosaurSleepSystem` tenga `NetworkObject` asignado
+2. Asegúrate de que el Animator tenga los triggers `SleepEnter` y `SleepExit`
+3. Revisa que los clips de audio de sueño estén asignados (sleepSound, wakeSound)
+4. Verifica que el script tenga autoridad de estado (`HasStateAuthority`)
+
 ---
 
 ## 📝 Notas Importantes
 
 1. **Hambre/Sed/Estamina** son solo locales. Cada jugador gestiona sus propias estadísticas.
 2. **Vida** es local pero el daño se envía por RPC, así que todos pueden atacar a todos.
-3. **Sueño** es completamente local. Los otros jugadores NO ven si estás durmiendo.
-4. **Posición/Rotación** se sincronizan automáticamente con `NetworkTransform`.
-5. **Animaciones** se sincronizan de forma optimizada (solo cuando cambian).
+3. **Animaciones de sueño** se sincronizan por RPC. Los otros jugadores VEN cuando estás durmiendo y escuchan los sonidos.
+4. **Regeneración durante el sueño** es solo local. Tu vida/estamina se regeneran solo para ti.
+5. **Posición/Rotación** se sincronizan automáticamente con `NetworkTransform`.
+6. **Animaciones** se sincronizan de forma optimizada (solo cuando cambian).
 
 ---
 

@@ -2,19 +2,21 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
 using System.Collections.Generic;
+using Fusion;
 
 /// <summary>
-/// Sistema de sueño para el dinosaurio - OPTIMIZADO PARA PHOTON FUSION
+/// Sistema de sueño para el dinosaurio - ADAPTADO PARA PHOTON FUSION
 /// ✅ Solo permite dormir cuando está COMPLETAMENTE DETENIDO
 /// ✅ NO permite dormir mientras nada
 /// ✅ Cooldown de 5 segundos después de presionar el botón
 /// ✅ Feedback visual y advertencias claras
 /// ⚡ OPTIMIZADO: Sin reflexión, código más eficiente (-70 líneas)
-/// 🌐 NOTA: Este sistema es LOCAL (no sincronizado por red)
-/// 🌐 Cada jugador ve solo su propio estado de sueño
-/// 🌐 Los otros jugadores NO ven si estás durmiendo
+/// 🌐 SINCRONIZACIÓN DE RED:
+/// 🌐 ✅ Animaciones de dormir (se ven por todos los jugadores)
+/// 🌐 ❌ Hambre/sed/estamina (solo locales)
+/// 🌐 ❌ UI de botones (solo local)
 /// </summary>
-public class DinosaurSleepSystem : MonoBehaviour
+public class DinosaurSleepSystem : NetworkBehaviour
 {
     [Header("Referencias")]
     [Tooltip("Referencia al Animator del dinosaurio")]
@@ -134,12 +136,19 @@ public class DinosaurSleepSystem : MonoBehaviour
     private const int STATE_ENTERING_SLEEP = 1;
     private const int STATE_SLEEPING = 2;
     private const int STATE_WAKING = 3;
-    
+
     // Nombres de los parámetros del Animator
     private const string ANIM_SLEEP_ENTER = "SleepEnter";
     private const string ANIM_SLEEP_EXIT = "SleepExit";
     private const string ANIM_IS_SLEEPING = "IsSleeping";
     private const string ANIM_SLEEP_STATE = "SleepState";
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 PROPIEDADES DE RED (PHOTON FUSION)
+    // ═══════════════════════════════════════════════════════════
+
+    [Networked] public NetworkBool IsSleepingNet { get; set; }
+    [Networked] public byte SleepStateNet { get; set; }
 
     // Control de estado de botones
     private Dictionary<Button, bool> originalButtonStates = new Dictionary<Button, bool>();
@@ -197,47 +206,75 @@ public class DinosaurSleepSystem : MonoBehaviour
     
     void Update()
     {
-        // Actualizar cooldown
-        UpdateCooldown();
-        
-        // Actualizar validación de movimiento
-        if (SleepState == STATE_AWAKE)
+        // 🌐 Solo el propietario ejecuta la lógica local
+        if (HasInputAuthority || !Object || !Object.IsValid)
         {
-            UpdateMovementValidation();
-            UpdateSwimmingStatus();
-            
-            // Actualizar estado del botón de dormir en tiempo real
-            if (disableButtonWhileMoving && sleepButton != null)
-            {
-                UpdateSleepButtonState();
-            }
-        }
-        else if (SleepState == STATE_SLEEPING)
-        {
-            // ⚡ Regenerar estamina y vida mientras duerme
-            RegenerateWhileSleeping();
+            // Actualizar cooldown
+            UpdateCooldown();
 
-            // Actualizar botón también cuando está durmiendo (para cooldown)
-            if (sleepButton != null)
+            // Actualizar validación de movimiento
+            if (SleepState == STATE_AWAKE)
             {
-                UpdateSleepButtonState();
+                UpdateMovementValidation();
+                UpdateSwimmingStatus();
+
+                // Actualizar estado del botón de dormir en tiempo real
+                if (disableButtonWhileMoving && sleepButton != null)
+                {
+                    UpdateSleepButtonState();
+                }
             }
+            else if (SleepState == STATE_SLEEPING)
+            {
+                // ⚡ Regenerar estamina y vida mientras duerme (solo local)
+                RegenerateWhileSleeping();
+
+                // Actualizar botón también cuando está durmiendo (para cooldown)
+                if (sleepButton != null)
+                {
+                    UpdateSleepButtonState();
+                }
+            }
+
+            // Actualizar texto del botón con cooldown (en cualquier estado)
+            if (showCooldownInText && isInCooldown)
+            {
+                UpdateButtonText();
+            }
+
+            // 🌐 Sincronizar variables de red (si es válido)
+            if (Object != null && Object.IsValid && Object.HasStateAuthority)
+            {
+                IsSleepingNet = IsSleeping;
+                SleepStateNet = (byte)SleepState;
+            }
+
+            #if UNITY_EDITOR
+            // Tecla ESC para despertar forzado (solo en editor)
+            if (Input.GetKeyDown(KeyCode.Escape) && IsSleeping)
+            {
+                Debug.Log("🔧 [DEBUG] Despertar forzado con ESC");
+                ForceWakeUp();
+            }
+            #endif
         }
-        
-        // Actualizar texto del botón con cooldown (en cualquier estado)
-        if (showCooldownInText && isInCooldown)
+        else
         {
-            UpdateButtonText();
+            // 🌐 Clientes remotos: aplicar valores de red a las animaciones
+            ApplyNetworkSleepState();
         }
-        
-        #if UNITY_EDITOR
-        // Tecla ESC para despertar forzado (solo en editor)
-        if (Input.GetKeyDown(KeyCode.Escape) && IsSleeping)
-        {
-            Debug.Log("🔧 [DEBUG] Despertar forzado con ESC");
-            ForceWakeUp();
-        }
-        #endif
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 Aplicar estado de sueño de red (clientes remotos)
+    // ═══════════════════════════════════════════════════════════
+    void ApplyNetworkSleepState()
+    {
+        IsSleeping = IsSleepingNet;
+        SleepState = SleepStateNet;
+
+        // Actualizar parámetros del Animator para reflejar el estado remoto
+        UpdateAnimatorParameters();
     }
     
     /// <summary>
@@ -722,44 +759,42 @@ public class DinosaurSleepSystem : MonoBehaviour
     private IEnumerator GoToSleepCoroutine()
     {
         DisableAllButtons();
-        
+
         if (dinosaurController != null)
         {
             dinosaurController.enabled = false;
         }
-        
+
         yield return null;
-        
+
         ResetAnimatorToIdle();
-        
+
         if (transitionDelay > 0)
         {
             yield return new WaitForSeconds(transitionDelay);
         }
-        
+
         UpdateAnimatorParameters();
-        
-        if (animator != null)
+
+        // 🌐 Sincronizar animación de dormir por RPC (para que todos la vean)
+        if (Object != null && Object.HasStateAuthority)
         {
-            animator.SetTrigger(ANIM_SLEEP_ENTER);
+            RPC_TriggerSleepAnimation(true); // true = entrar a dormir
         }
-        
-        PlaySound(sleepSound);
-        UpdateButtonText();
-        
+
         yield return new WaitForSeconds(sleepEnterDuration);
-        
+
         SleepState = STATE_SLEEPING;
         IsSleeping = true;
         UpdateAnimatorParameters();
         UpdateButtonText();
-        
+
         // ═══════════════════════════════════════════════════════════
         // 🛡️ DESPUÉS DE DORMIR: Mantener cooldown activo
         // ═══════════════════════════════════════════════════════════
         // El botón permanecerá desactivado hasta que el cooldown termine
         // UpdateSleepButtonState() lo manejará automáticamente
-        
+
         Debug.Log("💤 Dinosaurio está durmiendo profundamente");
         Debug.Log($"⏱️ Cooldown activo: {buttonCooldown}s hasta poder despertar");
     }
@@ -789,42 +824,80 @@ public class DinosaurSleepSystem : MonoBehaviour
         SleepState = STATE_WAKING;
         IsSleeping = false;
         UpdateAnimatorParameters();
-        
-        if (animator != null)
+
+        // 🌐 Sincronizar animación de despertar por RPC (para que todos la vean)
+        if (Object != null && Object.HasStateAuthority)
         {
-            animator.SetTrigger(ANIM_SLEEP_EXIT);
+            RPC_TriggerSleepAnimation(false); // false = despertar
         }
-        
-        PlaySound(wakeSound);
-        UpdateButtonText();
-        
+
         yield return new WaitForSeconds(sleepExitDuration);
-        
+
         ResetAnimatorToIdle();
-        
+
         SleepState = STATE_AWAKE;
         IsSleeping = false;
         UpdateAnimatorParameters();
-        
+
         yield return null;
-        
+
         if (dinosaurController != null)
             dinosaurController.enabled = true;
-            
+
         EnableAllButtons();
         UpdateButtonText();
-        
+
         // ═══════════════════════════════════════════════════════════
         // 🛡️ DESPUÉS DE DESPERTAR: El cooldown sigue activo
         // ═══════════════════════════════════════════════════════════
         // El botón permanecerá desactivado hasta que el cooldown termine
         // Update() y UpdateSleepButtonState() lo manejarán automáticamente
-        
+
         Debug.Log("✅ Dinosaurio despierto y listo para la acción!");
-        
+
         if (isInCooldown)
         {
             Debug.Log($"⏱️ Cooldown activo: {cooldownTimeRemaining:F1}s hasta poder dormir de nuevo");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌐 RPC - Sincronizar animación de dormir/despertar
+    // ═══════════════════════════════════════════════════════════
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    void RPC_TriggerSleepAnimation(bool isEnteringSleep)
+    {
+        if (isEnteringSleep)
+        {
+            // Entrar a dormir (se ejecuta en todos los clientes)
+            if (animator != null)
+            {
+                animator.SetTrigger(ANIM_SLEEP_ENTER);
+            }
+
+            // Sonido (se ejecuta en todos los clientes)
+            PlaySound(sleepSound);
+
+            Debug.Log("💤 [RPC] Animación de dormir sincronizada");
+        }
+        else
+        {
+            // Despertar (se ejecuta en todos los clientes)
+            if (animator != null)
+            {
+                animator.SetTrigger(ANIM_SLEEP_EXIT);
+            }
+
+            // Sonido (se ejecuta en todos los clientes)
+            PlaySound(wakeSound);
+
+            Debug.Log("🌅 [RPC] Animación de despertar sincronizada");
+        }
+
+        // Actualizar texto del botón (solo para el propietario)
+        if (HasInputAuthority)
+        {
+            UpdateButtonText();
         }
     }
     
