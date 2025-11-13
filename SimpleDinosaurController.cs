@@ -740,11 +740,12 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                 targetPosition = networkPosition;
             }
 
-            // Calcular dirección de movimiento
-            Vector3 moveVector = (targetPosition - transform.position) / Time.deltaTime;
+            // Interpolar suavemente hacia la posición objetivo
+            Vector3 newPosition = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * networkPositionLerp);
 
-            // Usar controller.Move() en lugar de transform.position para que isGrounded funcione
-            controller.Move(moveVector * Time.deltaTime * networkPositionLerp);
+            // Calcular desplazamiento y usar controller.Move() para actualizar isGrounded
+            Vector3 displacement = newPosition - transform.position;
+            controller.Move(displacement);
 
             // 🔍 DEBUG: Detectar cambios de isGrounded en remotos
             if (controller.isGrounded != lastGroundedState)
