@@ -720,32 +720,31 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     void Update()
     {
-        // 🌐 Jugadores remotos: aplicar movimiento de red
+        // 🌐 Jugadores remotos: interpolar posición y rotación
         if (!photonView.IsMine)
         {
-            // Interpolar rotación
-            transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
-
-            // ⚠️ CRÍTICO: Usar controller.Move() para que isGrounded se actualice correctamente
-            // Calcular movimiento hacia la posición de red
-            Vector3 targetPosition;
+            // Interpolar posición con predicción de movimiento
             if (networkVelocity != Vector3.zero)
             {
                 // Predicción: calcular dónde debería estar basado en velocidad
                 float timeSinceLastUpdate = (float)(PhotonNetwork.Time - lastReceiveTime);
-                targetPosition = networkPosition + (networkVelocity * timeSinceLastUpdate);
+                Vector3 predictedPosition = networkPosition + (networkVelocity * timeSinceLastUpdate);
+
+                // Interpolar hacia la posición predicha
+                transform.position = Vector3.Lerp(transform.position, predictedPosition, Time.deltaTime * networkPositionLerp);
             }
             else
             {
-                targetPosition = networkPosition;
+                // Sin velocidad, solo interpolar a la posición de red
+                transform.position = Vector3.Lerp(transform.position, networkPosition, Time.deltaTime * networkPositionLerp);
             }
 
-            // Interpolar suavemente hacia la posición objetivo
-            Vector3 newPosition = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * networkPositionLerp);
+            // Interpolar rotación
+            transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
 
-            // Calcular desplazamiento y usar controller.Move() para actualizar isGrounded
-            Vector3 displacement = newPosition - transform.position;
-            controller.Move(displacement);
+            // ⚠️ HACK: Forzar actualización de controller.isGrounded
+            // Aplicar un movimiento minúsculo hacia abajo para que Unity actualice las colisiones
+            controller.Move(Vector3.down * 0.001f);
 
             // 🔍 DEBUG: Detectar cambios de isGrounded en remotos
             if (controller.isGrounded != lastGroundedState)
