@@ -720,27 +720,38 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     void Update()
     {
-        // 🌐 Jugadores remotos: solo interpolar posición y rotación
+        // 🌐 Jugadores remotos: aplicar movimiento de red
         if (!photonView.IsMine)
         {
-            // Interpolar posición con predicción de movimiento
+            // Interpolar rotación
+            transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
+
+            // ⚠️ CRÍTICO: Usar controller.Move() para que isGrounded se actualice correctamente
+            // Calcular movimiento hacia la posición de red
+            Vector3 targetPosition;
             if (networkVelocity != Vector3.zero)
             {
                 // Predicción: calcular dónde debería estar basado en velocidad
                 float timeSinceLastUpdate = (float)(PhotonNetwork.Time - lastReceiveTime);
-                Vector3 predictedPosition = networkPosition + (networkVelocity * timeSinceLastUpdate);
-
-                // Interpolar hacia la posición predicha
-                transform.position = Vector3.Lerp(transform.position, predictedPosition, Time.deltaTime * networkPositionLerp);
+                targetPosition = networkPosition + (networkVelocity * timeSinceLastUpdate);
             }
             else
             {
-                // Sin velocidad, solo interpolar a la posición de red
-                transform.position = Vector3.Lerp(transform.position, networkPosition, Time.deltaTime * networkPositionLerp);
+                targetPosition = networkPosition;
             }
 
-            // Interpolar rotación
-            transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
+            // Calcular dirección de movimiento
+            Vector3 moveVector = (targetPosition - transform.position) / Time.deltaTime;
+
+            // Usar controller.Move() en lugar de transform.position para que isGrounded funcione
+            controller.Move(moveVector * Time.deltaTime * networkPositionLerp);
+
+            // 🔍 DEBUG: Detectar cambios de isGrounded en remotos
+            if (controller.isGrounded != lastGroundedState)
+            {
+                lastGroundedState = controller.isGrounded;
+                Debug.Log($"🟢 CAMBIO IsGrounded - IsMine:{photonView.IsMine} Nuevo:{controller.isGrounded} Pos.y:{transform.position.y:F2}");
+            }
 
             return; // No ejecutar lógica de control para jugadores remotos
         }
@@ -2763,6 +2774,22 @@ void UpdateTimers()
 				float turn = (float)stream.ReceiveNext();
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
+
+				// 🔍 DEBUG: Detectar cambios de idle variation
+				if (Mathf.Abs(currentIdleVariation - idleVariation) > 0.1f)
+				{
+					if (idleVariation > 0.1f)
+					{
+						Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{idleVariation:F0} (RECIBIDO)");
+					}
+					else if (currentIdleVariation > 0.1f)
+					{
+						Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (RECIBIDO)");
+					}
+				}
+
+				// Actualizar valor local de idle variation
+				currentIdleVariation = idleVariation;
 
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
