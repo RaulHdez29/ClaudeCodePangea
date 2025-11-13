@@ -2772,75 +2772,95 @@ void UpdateTimers()
 			// ========================================
 			Debug.Log($"📥 INICIANDO RECEPCIÓN DE DATOS - ViewID:{GetComponent<PhotonView>().ViewID} Sender:{info.Sender.NickName}");
 
-			// 1. POSICIÓN Y ROTACIÓN
-			networkPosition = (Vector3)stream.ReceiveNext();
-			networkRotation = (Quaternion)stream.ReceiveNext();
-
-			// 2. VELOCIDAD (para predicción)
-			networkVelocity = (Vector3)stream.ReceiveNext();
-
-			// 3. VELOCIDAD DE MOVIMIENTO
-			networkSpeed = (float)stream.ReceiveNext();
-
-			// 4. FLAGS DE BITS (descomprimir)
-			byte flags = (byte)stream.ReceiveNext();
-			isRunning = (flags & (1 << 0)) != 0;
-			isCrouching = (flags & (1 << 1)) != 0;
-			isSwimming = (flags & (1 << 2)) != 0;
-			isInWater = (flags & (1 << 3)) != 0;
-			isAttacking = (flags & (1 << 4)) != 0;
-			bool isGrounded = (flags & (1 << 5)) != 0;
-			isDead = (flags & (1 << 6)) != 0;
-			isCalling = (flags & (1 << 7)) != 0;
-
-			// Segundo byte de flags
-			byte flags2 = (byte)stream.ReceiveNext();
-			isEating = (flags2 & (1 << 0)) != 0;
-			isDrinking = (flags2 & (1 << 1)) != 0;
-
-			// 5. ESTADO ACTUAL
-			currentState = (MovementState)stream.ReceiveNext();
-
-			// 6. PARÁMETROS DEL ANIMATOR
-			float animSpeed = (float)stream.ReceiveNext();
-			float moveX = (float)stream.ReceiveNext();
-			float moveZ = (float)stream.ReceiveNext();
-			float verticalSpeed = (float)stream.ReceiveNext();
-			float turn = (float)stream.ReceiveNext();
-			float look = (float)stream.ReceiveNext();
-			float idleVariation = (float)stream.ReceiveNext();
-
-			// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
-			if (animator != null)
+			try
 			{
-				// 🔍 DEBUG: Log de valores recibidos
-				Debug.Log($"📥 RECIBIENDO - Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2} Turn:{turn:F2} Look:{look:F2} VelY:{verticalSpeed:F2}");
+				// 1. POSICIÓN Y ROTACIÓN
+				Debug.Log("📥 Paso 1: Recibiendo posición y rotación...");
+				networkPosition = (Vector3)stream.ReceiveNext();
+				networkRotation = (Quaternion)stream.ReceiveNext();
 
-				// IMPORTANTE: Actualizar SIEMPRE para que los blend trees funcionen correctamente
-				animator.SetFloat("Speed", animSpeed);
-				animator.SetFloat("MoveX", moveX);
-				animator.SetFloat("MoveZ", moveZ);
-				animator.SetFloat("VerticalSpeed", verticalSpeed);
-				animator.SetFloat("Turn", turn);
-				animator.SetFloat("Look", look);
-				animator.SetFloat("IdleVariation", idleVariation);
+				// 2. VELOCIDAD (para predicción)
+				Debug.Log("📥 Paso 2: Recibiendo velocidad...");
+				networkVelocity = (Vector3)stream.ReceiveNext();
 
-				// Booleanos (actualizar siempre)
-				animator.SetBool("IsRunning", isRunning);
-				animator.SetBool("IsCrouching", isCrouching);
-				animator.SetBool("IsSwimming", isSwimming);
-				animator.SetBool("IsGrounded", isGrounded);
-				animator.SetBool("IsAttacking", isAttacking);
-				animator.SetBool("IsDead", isDead);
-				animator.SetBool("IsEating", isEating);
-				animator.SetBool("IsDrinking", isDrinking);
+				// 3. VELOCIDAD DE MOVIMIENTO
+				Debug.Log("📥 Paso 3: Recibiendo velocidad de movimiento...");
+				networkSpeed = (float)stream.ReceiveNext();
 
-				// 🔍 DEBUG: Verificar que los valores se establecieron correctamente
-				Debug.Log($"✅ VERIFICADO - Speed en Animator:{animator.GetFloat("Speed"):F2} Turn:{animator.GetFloat("Turn"):F2} Look:{animator.GetFloat("Look"):F2}");
+				// 4. FLAGS DE BITS (descomprimir)
+				Debug.Log("📥 Paso 4: Recibiendo flags...");
+				byte flags = (byte)stream.ReceiveNext();
+				isRunning = (flags & (1 << 0)) != 0;
+				isCrouching = (flags & (1 << 1)) != 0;
+				isSwimming = (flags & (1 << 2)) != 0;
+				isInWater = (flags & (1 << 3)) != 0;
+				isAttacking = (flags & (1 << 4)) != 0;
+				bool isGrounded = (flags & (1 << 5)) != 0;
+				isDead = (flags & (1 << 6)) != 0;
+				isCalling = (flags & (1 << 7)) != 0;
+
+				// Segundo byte de flags
+				Debug.Log("📥 Paso 5: Recibiendo flags2...");
+				byte flags2 = (byte)stream.ReceiveNext();
+				isEating = (flags2 & (1 << 0)) != 0;
+				isDrinking = (flags2 & (1 << 1)) != 0;
+
+				// 5. ESTADO ACTUAL
+				Debug.Log("📥 Paso 6: Recibiendo estado actual...");
+				currentState = (MovementState)stream.ReceiveNext();
+
+				// 6. PARÁMETROS DEL ANIMATOR
+				Debug.Log("📥 Paso 7: Recibiendo parámetros del animator...");
+				float animSpeed = (float)stream.ReceiveNext();
+				float moveX = (float)stream.ReceiveNext();
+				float moveZ = (float)stream.ReceiveNext();
+				float verticalSpeed = (float)stream.ReceiveNext();
+				float turn = (float)stream.ReceiveNext();
+				float look = (float)stream.ReceiveNext();
+				float idleVariation = (float)stream.ReceiveNext();
+
+				Debug.Log("📥 Paso 8: Todos los datos recibidos correctamente");
+
+				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
+				if (animator != null)
+				{
+					// 🔍 DEBUG: Log de valores recibidos
+					Debug.Log($"📥 RECIBIENDO - Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2} Turn:{turn:F2} Look:{look:F2} VelY:{verticalSpeed:F2}");
+
+					// IMPORTANTE: Actualizar SIEMPRE para que los blend trees funcionen correctamente
+					animator.SetFloat("Speed", animSpeed);
+					animator.SetFloat("MoveX", moveX);
+					animator.SetFloat("MoveZ", moveZ);
+					animator.SetFloat("VerticalSpeed", verticalSpeed);
+					animator.SetFloat("Turn", turn);
+					animator.SetFloat("Look", look);
+					animator.SetFloat("IdleVariation", idleVariation);
+
+					// Booleanos (actualizar siempre)
+					animator.SetBool("IsRunning", isRunning);
+					animator.SetBool("IsCrouching", isCrouching);
+					animator.SetBool("IsSwimming", isSwimming);
+					animator.SetBool("IsGrounded", isGrounded);
+					animator.SetBool("IsAttacking", isAttacking);
+					animator.SetBool("IsDead", isDead);
+					animator.SetBool("IsEating", isEating);
+					animator.SetBool("IsDrinking", isDrinking);
+
+					// 🔍 DEBUG: Verificar que los valores se establecieron correctamente
+					Debug.Log($"✅ VERIFICADO - Speed en Animator:{animator.GetFloat("Speed"):F2} Turn:{animator.GetFloat("Turn"):F2} Look:{animator.GetFloat("Look"):F2}");
+				}
+				else
+				{
+					Debug.LogError("❌ ERROR: Animator es NULL en el jugador remoto!");
+				}
+
+				// 8. GUARDAR TIMESTAMP para predicción
+				lastReceiveTime = info.SentServerTime;
 			}
-
-			// 8. GUARDAR TIMESTAMP para predicción
-			lastReceiveTime = info.SentServerTime;
+			catch (System.Exception e)
+			{
+				Debug.LogError($"❌ ERROR AL RECIBIR DATOS: {e.Message}\n{e.StackTrace}");
+			}
 		}
 	}
 }
