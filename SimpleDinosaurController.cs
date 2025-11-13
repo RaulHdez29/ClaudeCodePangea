@@ -2710,38 +2710,43 @@ void UpdateTimers()
 
 			stream.SendNext(flags);
 
+			// Segundo byte de flags para estados adicionales
+			byte flags2 = 0;
+			if (isEating) flags2 |= 1 << 0;           // Bit 0
+			if (isDrinking) flags2 |= 1 << 1;         // Bit 1
+			stream.SendNext(flags2);
+
 			// 5. ESTADO ACTUAL (necesario para animaciones)
 			stream.SendNext((byte)currentState);
 
-			// 6. PARÁMETROS DEL ANIMATOR (solo si han cambiado)
-			// Esto es MUY IMPORTANTE para que todos vean las animaciones correctamente
-
-			// Speed
+			// 6. PARÁMETROS DEL ANIMATOR - TODOS LOS NECESARIOS PARA BLEND TREES
 			if (animator != null)
 			{
-				float animSpeed = animator.GetFloat("Speed");
-				stream.SendNext(animSpeed);
+				// Parámetros de movimiento básico
+				stream.SendNext(animator.GetFloat("Speed"));
+				stream.SendNext(animator.GetFloat("MoveX"));
+				stream.SendNext(animator.GetFloat("MoveZ"));
 
-				// MoveX y MoveZ (para strafe/idle variations)
-				if (animator.GetCurrentAnimatorStateInfo(0).IsName("Turn Look") ||
-				    animator.GetCurrentAnimatorStateInfo(0).IsName("Locomotion"))
-				{
-					float moveX = animator.GetFloat("MoveX");
-					float moveZ = animator.GetFloat("MoveZ");
-					stream.SendNext(moveX);
-					stream.SendNext(moveZ);
-				}
-				else
-				{
-					stream.SendNext(0f); // MoveX
-					stream.SendNext(0f); // MoveZ
-				}
+				// Parámetros de velocidad vertical (para salto)
+				stream.SendNext(animator.GetFloat("VerticalSpeed"));
+
+				// Parámetros de Turn y Look (CRÍTICOS para blend trees)
+				stream.SendNext(animator.GetFloat("Turn"));
+				stream.SendNext(animator.GetFloat("Look"));
+
+				// IdleVariation (para variaciones de idle)
+				stream.SendNext(animator.GetFloat("IdleVariation"));
 			}
 			else
 			{
+				// Si no hay animator, enviar ceros
 				stream.SendNext(0f); // Speed
 				stream.SendNext(0f); // MoveX
 				stream.SendNext(0f); // MoveZ
+				stream.SendNext(0f); // VerticalSpeed
+				stream.SendNext(0f); // Turn
+				stream.SendNext(0f); // Look
+				stream.SendNext(0f); // IdleVariation
 			}
 		}
 		else
@@ -2771,6 +2776,11 @@ void UpdateTimers()
 			isDead = (flags & (1 << 6)) != 0;
 			isCalling = (flags & (1 << 7)) != 0;
 
+			// Segundo byte de flags
+			byte flags2 = (byte)stream.ReceiveNext();
+			isEating = (flags2 & (1 << 0)) != 0;
+			isDrinking = (flags2 & (1 << 1)) != 0;
+
 			// 5. ESTADO ACTUAL
 			currentState = (MovementState)stream.ReceiveNext();
 
@@ -2778,44 +2788,32 @@ void UpdateTimers()
 			float animSpeed = (float)stream.ReceiveNext();
 			float moveX = (float)stream.ReceiveNext();
 			float moveZ = (float)stream.ReceiveNext();
+			float verticalSpeed = (float)stream.ReceiveNext();
+			float turn = (float)stream.ReceiveNext();
+			float look = (float)stream.ReceiveNext();
+			float idleVariation = (float)stream.ReceiveNext();
 
 			// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 			if (animator != null)
 			{
-				// Actualizar parámetros solo si han cambiado significativamente
-				if (Mathf.Abs(animator.GetFloat("Speed") - animSpeed) > 0.01f)
-				{
-					animator.SetFloat("Speed", animSpeed);
-				}
+				// IMPORTANTE: Actualizar SIEMPRE para que los blend trees funcionen correctamente
+				animator.SetFloat("Speed", animSpeed);
+				animator.SetFloat("MoveX", moveX);
+				animator.SetFloat("MoveZ", moveZ);
+				animator.SetFloat("VerticalSpeed", verticalSpeed);
+				animator.SetFloat("Turn", turn);
+				animator.SetFloat("Look", look);
+				animator.SetFloat("IdleVariation", idleVariation);
 
-				if (Mathf.Abs(animator.GetFloat("MoveX") - moveX) > 0.01f)
-				{
-					animator.SetFloat("MoveX", moveX);
-				}
-
-				if (Mathf.Abs(animator.GetFloat("MoveZ") - moveZ) > 0.01f)
-				{
-					animator.SetFloat("MoveZ", moveZ);
-				}
-
-				// Booleanos (solo actualizar si cambiaron)
-				if (animator.GetBool("IsRunning") != isRunning)
-					animator.SetBool("IsRunning", isRunning);
-
-				if (animator.GetBool("IsCrouching") != isCrouching)
-					animator.SetBool("IsCrouching", isCrouching);
-
-				if (animator.GetBool("IsSwimming") != isSwimming)
-					animator.SetBool("IsSwimming", isSwimming);
-
-				if (animator.GetBool("IsGrounded") != isGrounded)
-					animator.SetBool("IsGrounded", isGrounded);
-
-				if (animator.GetBool("IsAttacking") != isAttacking)
-					animator.SetBool("IsAttacking", isAttacking);
-
-				if (animator.GetBool("IsDead") != isDead)
-					animator.SetBool("IsDead", isDead);
+				// Booleanos (actualizar siempre)
+				animator.SetBool("IsRunning", isRunning);
+				animator.SetBool("IsCrouching", isCrouching);
+				animator.SetBool("IsSwimming", isSwimming);
+				animator.SetBool("IsGrounded", isGrounded);
+				animator.SetBool("IsAttacking", isAttacking);
+				animator.SetBool("IsDead", isDead);
+				animator.SetBool("IsEating", isEating);
+				animator.SetBool("IsDrinking", isDrinking);
 			}
 
 			// 8. GUARDAR TIMESTAMP para predicción
