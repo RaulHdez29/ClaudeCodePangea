@@ -589,7 +589,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             return;
         }
 
-        Debug.Log($"📏 Aplicando preset de tamaño: {dinosaurSize} (Altura: {modelHeight}m)");
 
         switch (dinosaurSize)
         {
@@ -612,7 +611,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             controller.center = new Vector3(0, modelHeight * 0.5f, 0);
         }
 
-        Debug.Log($"✅ Configuración aplicada: Walk={walkSpeed}, Run={runSpeed}, Swim={swimSpeed}, WaterOffset={waterSurfaceOffset}");
     }
 
     void ApplySmallPreset()
@@ -882,7 +880,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             if (isCrouching && isRunning && inputVector.magnitude > movementThreshold)
             {
                 isCrouching = false;
-                Debug.Log("🏃 Saliendo de crouch porque se activó correr con movimiento");
             }
 
             // Obtener vectores de la cámara
@@ -1285,11 +1282,6 @@ void UpdateAnimations()
                 currentTurn = savedTurnBeforeVariation;
                 currentLook = savedLookBeforeVariation;
                 isRestoringTurnLook = false;
-
-                if (showIdleVariationDebugLogs)
-                {
-                    Debug.Log($"🎭 [DEBUG] Restauración de Turn/Look completada");
-                }
             }
             return;
         }
@@ -1389,11 +1381,6 @@ void UpdateAnimations()
             return;
         }
 
-        // 🐛 DEBUG: Log estado inicial (solo cada 60 frames para no spamear)
-        if (showIdleVariationDebugLogs && Time.frameCount % 60 == 0)
-        {
-            Debug.Log($"🎭 [DEBUG] UpdateIdleVariations - State: {currentState}, isPlayingIdleVariation: {isPlayingIdleVariation}, idleTimer: {idleTimer:F1}s");
-        }
 
         // Verificar si está en estado Idle (completamente quieto)
         bool isInIdleState = currentState == MovementState.Idle &&
@@ -1455,20 +1442,10 @@ void UpdateAnimations()
                 currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
 
-                if (showIdleVariationDebugLogs)
-                {
-                    Debug.Log($"🎭 [DEBUG] Animación completada después de {idleVariationTimer:F2}s (duración configurada: {currentAnimationDuration:F2}s)");
-                }
-
                 // 🔄 Activar restauración de Turn/Look (si había valores guardados)
                 if (Mathf.Abs(savedTurnBeforeVariation) > 0.01f || Mathf.Abs(savedLookBeforeVariation) > 0.01f)
                 {
                     isRestoringTurnLook = true;
-
-                    if (showIdleVariationDebugLogs)
-                    {
-                        Debug.Log($"🎭 [DEBUG] Iniciando restauración de Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2}");
-                    }
                 }
 
                 ResetIdleVariationTimer();
@@ -1479,22 +1456,11 @@ void UpdateAnimations()
             // ⏱️ Está en idle normal - contar tiempo
             idleTimer += Time.deltaTime;
 
-            // 🐛 DEBUG: Log cada 5 segundos de espera
-            if (showIdleVariationDebugLogs && Mathf.FloorToInt(idleTimer) % 5 == 0 && idleTimer > 0.1f && Time.frameCount % 60 == 0)
-            {
-                Debug.Log($"🎭 [DEBUG] Esperando idle variation... {idleTimer:F1}s / {nextIdleVariationTime:F1}s");
-            }
-
             // Cuando llega al tiempo objetivo, decidir si activar variation
             if (idleTimer >= nextIdleVariationTime)
             {
                 // Tirar dado para ver si activa variation
                 float randomChance = Random.Range(0f, 100f);
-
-                if (showIdleVariationDebugLogs)
-                {
-                    Debug.Log($"🎭 [DEBUG] Intentando activar variation - Chance: {randomChance:F0}% (Req: {idleVariationChance}%)");
-                }
 
                 if (randomChance <= idleVariationChance)
                 {
@@ -1515,36 +1481,15 @@ void UpdateAnimations()
                     {
                         // Play el estado actual con normalizedTime = 0 (frame 0)
                         animator.Play(idleStateNameInAnimator, 0, 0f);
-
-                        if (showIdleVariationDebugLogs)
-                        {
-                            Debug.Log($"🎭 ✅ Forzando restart del estado '{idleStateNameInAnimator}' desde frame 0");
-                        }
                     }
                     else
                     {
-                        Debug.LogWarning($"🎭 ⚠️ WARNING: idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Por favor configura el nombre del estado en el Inspector.");
-                    }
-
-                    // Obtener duración para debug
-                    float duration = currentIdleVariationIndex < idleVariationDurations.Length ? idleVariationDurations[currentIdleVariationIndex] : 3f;
-
-                    if (showIdleVariationDebugLogs)
-                    {
-                        Debug.Log($"🎭 ✅ Activando Idle Variation #{randomVariationNumber} (índice {currentIdleVariationIndex}, duración: {duration:F2}s) - Guardado Turn: {savedTurnBeforeVariation:F2}, Look: {savedLookBeforeVariation:F2}");
-                    }
-                    else
-                    {
-                        Debug.Log($"🎭 ✅ Activando Idle Variation #{randomVariationNumber} (duración: {duration:F2}s)");
+                        Debug.LogWarning("⚠️ idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Configura el nombre del estado en el Inspector.");
                     }
                 }
                 else
                 {
                     // ❌ No activar, resetear timer para intentar de nuevo
-                    if (showIdleVariationDebugLogs)
-                    {
-                        Debug.Log($"🎭 ❌ No se activó (mala suerte), intentando de nuevo en {minIdleTimeBeforeVariation}-{maxIdleTimeBeforeVariation}s");
-                    }
                     ResetIdleVariationTimer();
                 }
             }
@@ -1772,7 +1717,6 @@ void UpdateAnimations()
             if (healthSystem != null && !healthSystem.isDead)
             {
                 healthSystem.TakeDamage(damage);
-                Debug.Log($"Recibí {damage} de daño del jugador {attackerViewID}");
             }
         }
     }
@@ -1835,8 +1779,8 @@ void RPC_DoJump()
     {
         animator.ResetTrigger("Jump");
         animator.SetTrigger("Jump");
-        animator.SetBool("IsGrounded", false);
         animator.SetFloat("VerticalSpeed", velocity.y);
+        // NOTA: IsGrounded se actualiza automáticamente en UpdateAnimations() cada frame
     }
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
@@ -2166,7 +2110,6 @@ void UpdateTimers()
             UpdateWaterSurface(other);
 
             // ✅ NO activar isInWater inmediatamente, esperar a verificar profundidad
-            Debug.Log("🌊 Dinosaurio tocó el agua (verificando profundidad...)");
         }
     }
 
@@ -2192,7 +2135,6 @@ void UpdateTimers()
                 // Entró a agua profunda
                 isInWater = true;
                 wasInWater = true;
-                Debug.Log($"🏊 Agua profunda detectada! (profundidad: {waterDepth:F2}m, umbral: {enterThreshold:F2}m)");
             }
             // ✅ Solo desactivar si la profundidad baja significativamente (histéresis)
             else if (isInWater && waterDepth < exitThreshold)
@@ -2200,7 +2142,6 @@ void UpdateTimers()
                 // Salió a agua poco profunda (con tolerancia)
                 isInWater = false;
                 isSwimming = false;
-                Debug.Log($"🚶 Agua poco profunda (profundidad: {waterDepth:F2}m, umbral salida: {exitThreshold:F2}m)");
             }
         }
     }
@@ -2680,10 +2621,6 @@ void UpdateTimers()
 	// SOLO envía datos que han CAMBIADO para minimizar tráfico de red
 	public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
 	{
-		// 🔍 DEBUG: Información de red al inicio
-		PhotonView pv = GetComponent<PhotonView>();
-		Debug.Log($"🌐 OnPhotonSerializeView - IsMine:{pv.IsMine} IsWriting:{stream.IsWriting} IsReading:{!stream.IsWriting} Jugadores:{PhotonNetwork.PlayerList.Length} ViewID:{pv.ViewID}");
-
 		if (stream.IsWriting)
 		{
 			// ========================================
@@ -2761,34 +2698,25 @@ void UpdateTimers()
 
 			// IdleVariation
 			stream.SendNext(currentIdleVariation);
-
-			// 🔍 DEBUG: Log de valores enviados
-			Debug.Log($"📤 ENVIANDO - Speed:{normalizedSpeed:F2} MoveX:{localMove.x:F2} MoveZ:{localMove.z:F2} Turn:{currentTurn:F2} Look:{currentLook:F2} VelY:{velocity.y:F2}");
 		}
 		else
 		{
 			// ========================================
 			// RECIBIMOS DATOS (jugador remoto)
 			// ========================================
-			Debug.Log($"📥 INICIANDO RECEPCIÓN DE DATOS - ViewID:{GetComponent<PhotonView>().ViewID} Sender:{info.Sender.NickName}");
-
 			try
 			{
 				// 1. POSICIÓN Y ROTACIÓN
-				Debug.Log("📥 Paso 1: Recibiendo posición y rotación...");
 				networkPosition = (Vector3)stream.ReceiveNext();
 				networkRotation = (Quaternion)stream.ReceiveNext();
 
 				// 2. VELOCIDAD (para predicción)
-				Debug.Log("📥 Paso 2: Recibiendo velocidad...");
 				networkVelocity = (Vector3)stream.ReceiveNext();
 
 				// 3. VELOCIDAD DE MOVIMIENTO
-				Debug.Log("📥 Paso 3: Recibiendo velocidad de movimiento...");
 				networkSpeed = (float)stream.ReceiveNext();
 
 				// 4. FLAGS DE BITS (descomprimir)
-				Debug.Log("📥 Paso 4: Recibiendo flags...");
 				byte flags = (byte)stream.ReceiveNext();
 				isRunning = (flags & (1 << 0)) != 0;
 				isCrouching = (flags & (1 << 1)) != 0;
@@ -2800,22 +2728,15 @@ void UpdateTimers()
 				isCalling = (flags & (1 << 7)) != 0;
 
 				// Segundo byte de flags
-				Debug.Log("📥 Paso 5: Recibiendo flags2...");
 				byte flags2 = (byte)stream.ReceiveNext();
 				isEating = (flags2 & (1 << 0)) != 0;
 				isDrinking = (flags2 & (1 << 1)) != 0;
 
-				// 5. ESTADO ACTUAL
-				Debug.Log("📥 Paso 6: Recibiendo estado actual...");
-				object stateObj = stream.ReceiveNext();
-				Debug.Log($"📥 Paso 6.1: Estado recibido como object: {stateObj} (Tipo: {stateObj.GetType().Name})");
-				byte stateByte = (byte)stateObj;
-				Debug.Log($"📥 Paso 6.2: Estado como byte: {stateByte}");
+				// 5. ESTADO ACTUAL (convertir con cast explícito)
+				byte stateByte = (byte)stream.ReceiveNext();
 				currentState = (MovementState)stateByte;
-				Debug.Log($"📥 Paso 6.3: Estado convertido a enum: {currentState}");
 
 				// 6. PARÁMETROS DEL ANIMATOR
-				Debug.Log("📥 Paso 7: Recibiendo parámetros del animator...");
 				float animSpeed = (float)stream.ReceiveNext();
 				float moveX = (float)stream.ReceiveNext();
 				float moveZ = (float)stream.ReceiveNext();
@@ -2824,15 +2745,10 @@ void UpdateTimers()
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
 
-				Debug.Log("📥 Paso 8: Todos los datos recibidos correctamente");
-
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
-					// 🔍 DEBUG: Log de valores recibidos
-					Debug.Log($"📥 RECIBIENDO - Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2} Turn:{turn:F2} Look:{look:F2} VelY:{verticalSpeed:F2}");
-
-					// IMPORTANTE: Actualizar SIEMPRE para que los blend trees funcionen correctamente
+					// Actualizar SIEMPRE para que los blend trees funcionen correctamente
 					animator.SetFloat("Speed", animSpeed);
 					animator.SetFloat("MoveX", moveX);
 					animator.SetFloat("MoveZ", moveZ);
@@ -2850,13 +2766,6 @@ void UpdateTimers()
 					animator.SetBool("IsDead", isDead);
 					animator.SetBool("IsEating", isEating);
 					animator.SetBool("IsDrinking", isDrinking);
-
-					// 🔍 DEBUG: Verificar que los valores se establecieron correctamente
-					Debug.Log($"✅ VERIFICADO - Speed en Animator:{animator.GetFloat("Speed"):F2} Turn:{animator.GetFloat("Turn"):F2} Look:{animator.GetFloat("Look"):F2}");
-				}
-				else
-				{
-					Debug.LogError("❌ ERROR: Animator es NULL en el jugador remoto!");
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
@@ -2864,7 +2773,7 @@ void UpdateTimers()
 			}
 			catch (System.Exception e)
 			{
-				Debug.LogError($"❌ ERROR AL RECIBIR DATOS: {e.Message}\n{e.StackTrace}");
+				Debug.LogError($"ERROR en OnPhotonSerializeView (recepción): {e.Message}");
 			}
 		}
 	}
