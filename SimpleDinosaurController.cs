@@ -2807,11 +2807,11 @@ void UpdateTimers()
 				{
 					if (idleVariation > 0.1f)
 					{
-						Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{idleVariation:F0} (RECIBIDO) Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2}");
+						Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{idleVariation:F0} (RECIBIDO) Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2} IsGrounded:{isGrounded}");
 					}
 					else if (currentIdleVariation > 0.1f)
 					{
-						Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (RECIBIDO)");
+						Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (RECIBIDO) Speed:{animSpeed:F2}");
 					}
 				}
 
@@ -2822,6 +2822,13 @@ void UpdateTimers()
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
+					// 🔍 DEBUG: Detectar cambio de IsGrounded (especialmente False → True después de salto)
+					bool prevGrounded = animator.GetBool("IsGrounded");
+					if (prevGrounded != isGrounded)
+					{
+						Debug.Log($"🟢 ISGROUNDED CAMBIÓ EN ANIMATOR - IsMine:{photonView.IsMine} Anterior:{prevGrounded} Nuevo:{isGrounded} VelY:{verticalSpeed:F2}");
+					}
+
 					// Actualizar SIEMPRE para que los blend trees funcionen correctamente
 					animator.SetFloat("Speed", animSpeed);
 					animator.SetFloat("MoveX", moveX);
@@ -2841,6 +2848,13 @@ void UpdateTimers()
 					animator.SetBool("IsDead", isDead);
 					animator.SetBool("IsEating", isEating);
 					animator.SetBool("IsDrinking", isDrinking);
+
+					// 🔍 DEBUG: Log después de actualizar todos los parámetros (solo si hay cambios significativos)
+					if (prevGrounded != isGrounded || Mathf.Abs(verticalSpeed) > 0.1f)
+					{
+						AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(0);
+						Debug.Log($"🎬 ANIMATOR STATE - IsMine:{photonView.IsMine} State:{stateInfo.shortNameHash} IsGrounded:{isGrounded} Speed:{animSpeed:F2} VelY:{verticalSpeed:F2}");
+					}
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
