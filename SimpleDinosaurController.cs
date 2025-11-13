@@ -15,6 +15,40 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Header("🌐 Photon PUN2")]
     private PhotonView photonView;
 
+    [Header("🌐 Optimización de Red")]
+    [Tooltip("Velocidad de interpolación de posición (más alto = más suave pero con lag)")]
+    [Range(5f, 30f)]
+    public float networkPositionLerp = 15f;
+
+    [Tooltip("Velocidad de interpolación de rotación")]
+    [Range(5f, 30f)]
+    public float networkRotationLerp = 20f;
+
+    [Tooltip("Distancia mínima para sincronizar posición (metros)")]
+    public float positionThreshold = 0.1f;
+
+    [Tooltip("Ángulo mínimo para sincronizar rotación (grados)")]
+    public float rotationThreshold = 2f;
+
+    // Variables de red para interpolación
+    private Vector3 networkPosition;
+    private Quaternion networkRotation;
+    private Vector3 networkVelocity;
+    private float networkSpeed;
+
+    // Última sincronización de parámetros del Animator (para detectar cambios)
+    private float lastNetworkSpeed = -1f;
+    private bool lastNetworkIsRunning = false;
+    private bool lastNetworkIsCrouching = false;
+    private bool lastNetworkIsSwimming = false;
+    private bool lastNetworkIsAttacking = false;
+    private bool lastNetworkIsGrounded = true;
+    private bool lastNetworkIsDead = false;
+    private int lastNetworkState = -1;
+
+    // Timestamp para predicción
+    private double lastReceiveTime;
+
     [Header("Referencias")]
     public Animator animator;
     public AudioSource audioSource;
@@ -685,9 +719,30 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     void Update()
     {
-        // 🌐 Solo el jugador local ejecuta la lógica de control
+        // 🌐 Jugadores remotos: solo interpolar posición y rotación
         if (!photonView.IsMine)
-            return;
+        {
+            // Interpolar posición con predicción de movimiento
+            if (networkVelocity != Vector3.zero)
+            {
+                // Predicción: calcular dónde debería estar basado en velocidad
+                float timeSinceLastUpdate = (float)(PhotonNetwork.Time - lastReceiveTime);
+                Vector3 predictedPosition = networkPosition + (networkVelocity * timeSinceLastUpdate);
+
+                // Interpolar hacia la posición predicha
+                transform.position = Vector3.Lerp(transform.position, predictedPosition, Time.deltaTime * networkPositionLerp);
+            }
+            else
+            {
+                // Sin velocidad, solo interpolar a la posición de red
+                transform.position = Vector3.Lerp(transform.position, networkPosition, Time.deltaTime * networkPositionLerp);
+            }
+
+            // Interpolar rotación
+            transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
+
+            return; // No ejecutar lógica de control para jugadores remotos
+        }
 
 		// 💀 Si está muerto, no hacer nada
 		if (isDead)
@@ -1624,10 +1679,11 @@ void UpdateAnimations()
         // Limpiar lista de enemigos golpeados
         enemiesHit.Clear();
 
-        // Animación (se ejecuta en todos los clientes)
+        // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes para que todos vean el ataque
         if (animator != null)
         {
             animator.SetTrigger("Attack");
+            animator.SetBool("IsAttacking", true);
         }
 
         // Sonido (se ejecuta en todos los clientes)
@@ -1755,11 +1811,26 @@ void UpdateAnimations()
 	
 private void DoJump()
 {
+    // 🌐 Sincronizar salto en todos los clientes
+    if (photonView != null)
+    {
+        photonView.RPC("RPC_DoJump", RpcTarget.All);
+    }
+    else
+    {
+        RPC_DoJump();
+    }
+}
+
+[PunRPC]
+void RPC_DoJump()
+{
     velocity.y = Mathf.Sqrt(Mathf.Max(0.0001f, jumpHeight) * -2f * gravity);
     canJump = false;
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
 
+    // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
     {
         animator.ResetTrigger("Jump");
@@ -1768,6 +1839,7 @@ private void DoJump()
         animator.SetFloat("VerticalSpeed", velocity.y);
     }
 
+    // 🌐 SONIDO - Se ejecuta en todos los clientes
     PlayJumpSound();
 }
 
@@ -1898,18 +1970,32 @@ void UpdateTimers()
 		// 🍖 No rugir mientras come o bebe
 		if (isEating || isDrinking) return;
 
+		// 🌐 Sincronizar llamado en todos los clientes
+		if (photonView != null)
+		{
+			photonView.RPC("RPC_PlayCall", RpcTarget.All);
+		}
+		else
+		{
+			RPC_PlayCall();
+		}
+	}
+
+	[PunRPC]
+	void RPC_PlayCall()
+	{
 		// Activar rugido
 		isCalling = true;
 		callTimer = callDuration;
 
-		// Sonido de rugido
+		// 🌐 SONIDO - Se ejecuta en todos los clientes
 		if (audioSource != null && callSounds.Length > 0)
 		{
 			AudioClip clip = callSounds[Random.Range(0, callSounds.Length)];
 			audioSource.PlayOneShot(clip);
 		}
 
-		// Animación
+		// 🌐 ANIMACIÓN - Se ejecuta en todos los clientes
 		if (animator != null)
 		{
 			animator.ResetTrigger("Attack");
@@ -2260,9 +2346,23 @@ void UpdateTimers()
 	{
 		if (nearbyFood == null || currentHunger >= maxHunger) return;
 
+		// 🌐 Sincronizar animación de comer en todos los clientes
+		if (photonView != null)
+		{
+			photonView.RPC("RPC_StartEating", RpcTarget.All);
+		}
+		else
+		{
+			RPC_StartEating();
+		}
+	}
+
+	[PunRPC]
+	void RPC_StartEating()
+	{
 		isEating = true;
 
-		// Activar animación de comer
+		// 🌐 ANIMACIÓN - Se ejecuta en todos los clientes
 		if (animator != null)
 		{
 			animator.SetBool("IsEating", true);
@@ -2271,8 +2371,11 @@ void UpdateTimers()
 
 		Debug.Log("🍖 Dinosaurio comenzó a comer");
 
-		// Iniciar corrutina de comer
-		StartCoroutine(EatingCoroutine());
+		// Iniciar corrutina de comer (solo en el dueño)
+		if (photonView == null || photonView.IsMine)
+		{
+			StartCoroutine(EatingCoroutine());
+		}
 	}
 
 	/// <summary>
@@ -2309,15 +2412,33 @@ void UpdateTimers()
 	/// </summary>
 	void StopEating()
 	{
+		// 🌐 Sincronizar detener comer en todos los clientes
+		if (photonView != null)
+		{
+			photonView.RPC("RPC_StopEating", RpcTarget.All);
+		}
+		else
+		{
+			RPC_StopEating();
+		}
+	}
+
+	[PunRPC]
+	void RPC_StopEating()
+	{
 		isEating = false;
 
-		// Desactivar animación de comer
+		// 🌐 ANIMACIÓN - Se ejecuta en todos los clientes
 		if (animator != null)
 		{
 			animator.SetBool("IsEating", false);
 		}
 
-		StopCoroutine(EatingCoroutine());
+		// Solo el dueño detiene la corrutina
+		if (photonView == null || photonView.IsMine)
+		{
+			StopCoroutine(EatingCoroutine());
+		}
 
 		Debug.Log("🍖 Dinosaurio dejó de comer");
 	}
@@ -2346,9 +2467,23 @@ void UpdateTimers()
 	{
 		if (nearbyWater == null || currentThirst >= maxThirst) return;
 
+		// 🌐 Sincronizar animación de beber en todos los clientes
+		if (photonView != null)
+		{
+			photonView.RPC("RPC_StartDrinking", RpcTarget.All);
+		}
+		else
+		{
+			RPC_StartDrinking();
+		}
+	}
+
+	[PunRPC]
+	void RPC_StartDrinking()
+	{
 		isDrinking = true;
 
-		// Activar animación de beber
+		// 🌐 ANIMACIÓN - Se ejecuta en todos los clientes
 		if (animator != null)
 		{
 			animator.SetBool("IsDrinking", true);
@@ -2357,8 +2492,11 @@ void UpdateTimers()
 
 		Debug.Log("💧 Dinosaurio comenzó a beber");
 
-		// Iniciar corrutina de beber
-		StartCoroutine(DrinkingCoroutine());
+		// Iniciar corrutina de beber (solo en el dueño)
+		if (photonView == null || photonView.IsMine)
+		{
+			StartCoroutine(DrinkingCoroutine());
+		}
 	}
 
 	/// <summary>
@@ -2395,15 +2533,33 @@ void UpdateTimers()
 	/// </summary>
 	void StopDrinking()
 	{
+		// 🌐 Sincronizar detener beber en todos los clientes
+		if (photonView != null)
+		{
+			photonView.RPC("RPC_StopDrinking", RpcTarget.All);
+		}
+		else
+		{
+			RPC_StopDrinking();
+		}
+	}
+
+	[PunRPC]
+	void RPC_StopDrinking()
+	{
 		isDrinking = false;
 
-		// Desactivar animación de beber
+		// 🌐 ANIMACIÓN - Se ejecuta en todos los clientes
 		if (animator != null)
 		{
 			animator.SetBool("IsDrinking", false);
 		}
 
-		StopCoroutine(DrinkingCoroutine());
+		// Solo el dueño detiene la corrutina
+		if (photonView == null || photonView.IsMine)
+		{
+			StopCoroutine(DrinkingCoroutine());
+		}
 
 		Debug.Log("💧 Dinosaurio dejó de beber");
 	}
@@ -2520,28 +2676,150 @@ void UpdateTimers()
 		this.enabled = false;
 	}
 
-	// 🌐 PHOTON: Sincronización de datos personalizados
+	// 🌐 PHOTON: Sincronización OPTIMIZADA de datos personalizados
+	// SOLO envía datos que han CAMBIADO para minimizar tráfico de red
 	public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
 	{
 		if (stream.IsWriting)
 		{
-			// Enviamos datos (somos el dueño)
-			stream.SendNext(isRunning);
-			stream.SendNext(isCrouching);
-			stream.SendNext(isSwimming);
-			stream.SendNext(isInWater);
-			stream.SendNext(isDead);
-			stream.SendNext((int)currentState);
+			// ========================================
+			// ENVIAMOS DATOS (somos el dueño)
+			// ========================================
+
+			// 1. POSICIÓN Y ROTACIÓN (siempre necesarias para interpolación)
+			stream.SendNext(transform.position);
+			stream.SendNext(transform.rotation);
+
+			// 2. VELOCIDAD (para predicción de movimiento)
+			stream.SendNext(controller.velocity);
+
+			// 3. VELOCIDAD DE MOVIMIENTO (para animaciones)
+			stream.SendNext(currentSpeed);
+
+			// 4. FLAGS DE BITS (comprimir booleanos en un solo byte)
+			// Usar bits para reducir 8 booleanos a 1 byte
+			byte flags = 0;
+			if (isRunning) flags |= 1 << 0;           // Bit 0
+			if (isCrouching) flags |= 1 << 1;         // Bit 1
+			if (isSwimming) flags |= 1 << 2;          // Bit 2
+			if (isInWater) flags |= 1 << 3;           // Bit 3
+			if (isAttacking) flags |= 1 << 4;         // Bit 4
+			if (controller.isGrounded) flags |= 1 << 5; // Bit 5
+			if (isDead) flags |= 1 << 6;              // Bit 6
+			if (isCalling) flags |= 1 << 7;           // Bit 7
+
+			stream.SendNext(flags);
+
+			// 5. ESTADO ACTUAL (necesario para animaciones)
+			stream.SendNext((byte)currentState);
+
+			// 6. PARÁMETROS DEL ANIMATOR (solo si han cambiado)
+			// Esto es MUY IMPORTANTE para que todos vean las animaciones correctamente
+
+			// Speed
+			if (animator != null)
+			{
+				float animSpeed = animator.GetFloat("Speed");
+				stream.SendNext(animSpeed);
+
+				// MoveX y MoveZ (para strafe/idle variations)
+				if (animator.GetCurrentAnimatorStateInfo(0).IsName("Turn Look") ||
+				    animator.GetCurrentAnimatorStateInfo(0).IsName("Locomotion"))
+				{
+					float moveX = animator.GetFloat("MoveX");
+					float moveZ = animator.GetFloat("MoveZ");
+					stream.SendNext(moveX);
+					stream.SendNext(moveZ);
+				}
+				else
+				{
+					stream.SendNext(0f); // MoveX
+					stream.SendNext(0f); // MoveZ
+				}
+			}
+			else
+			{
+				stream.SendNext(0f); // Speed
+				stream.SendNext(0f); // MoveX
+				stream.SendNext(0f); // MoveZ
+			}
 		}
 		else
 		{
-			// Recibimos datos (jugador remoto)
-			isRunning = (bool)stream.ReceiveNext();
-			isCrouching = (bool)stream.ReceiveNext();
-			isSwimming = (bool)stream.ReceiveNext();
-			isInWater = (bool)stream.ReceiveNext();
-			isDead = (bool)stream.ReceiveNext();
+			// ========================================
+			// RECIBIMOS DATOS (jugador remoto)
+			// ========================================
+
+			// 1. POSICIÓN Y ROTACIÓN
+			networkPosition = (Vector3)stream.ReceiveNext();
+			networkRotation = (Quaternion)stream.ReceiveNext();
+
+			// 2. VELOCIDAD (para predicción)
+			networkVelocity = (Vector3)stream.ReceiveNext();
+
+			// 3. VELOCIDAD DE MOVIMIENTO
+			networkSpeed = (float)stream.ReceiveNext();
+
+			// 4. FLAGS DE BITS (descomprimir)
+			byte flags = (byte)stream.ReceiveNext();
+			isRunning = (flags & (1 << 0)) != 0;
+			isCrouching = (flags & (1 << 1)) != 0;
+			isSwimming = (flags & (1 << 2)) != 0;
+			isInWater = (flags & (1 << 3)) != 0;
+			isAttacking = (flags & (1 << 4)) != 0;
+			bool isGrounded = (flags & (1 << 5)) != 0;
+			isDead = (flags & (1 << 6)) != 0;
+			isCalling = (flags & (1 << 7)) != 0;
+
+			// 5. ESTADO ACTUAL
 			currentState = (MovementState)stream.ReceiveNext();
+
+			// 6. PARÁMETROS DEL ANIMATOR
+			float animSpeed = (float)stream.ReceiveNext();
+			float moveX = (float)stream.ReceiveNext();
+			float moveZ = (float)stream.ReceiveNext();
+
+			// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
+			if (animator != null)
+			{
+				// Actualizar parámetros solo si han cambiado significativamente
+				if (Mathf.Abs(animator.GetFloat("Speed") - animSpeed) > 0.01f)
+				{
+					animator.SetFloat("Speed", animSpeed);
+				}
+
+				if (Mathf.Abs(animator.GetFloat("MoveX") - moveX) > 0.01f)
+				{
+					animator.SetFloat("MoveX", moveX);
+				}
+
+				if (Mathf.Abs(animator.GetFloat("MoveZ") - moveZ) > 0.01f)
+				{
+					animator.SetFloat("MoveZ", moveZ);
+				}
+
+				// Booleanos (solo actualizar si cambiaron)
+				if (animator.GetBool("IsRunning") != isRunning)
+					animator.SetBool("IsRunning", isRunning);
+
+				if (animator.GetBool("IsCrouching") != isCrouching)
+					animator.SetBool("IsCrouching", isCrouching);
+
+				if (animator.GetBool("IsSwimming") != isSwimming)
+					animator.SetBool("IsSwimming", isSwimming);
+
+				if (animator.GetBool("IsGrounded") != isGrounded)
+					animator.SetBool("IsGrounded", isGrounded);
+
+				if (animator.GetBool("IsAttacking") != isAttacking)
+					animator.SetBool("IsAttacking", isAttacking);
+
+				if (animator.GetBool("IsDead") != isDead)
+					animator.SetBool("IsDead", isDead);
+			}
+
+			// 8. GUARDAR TIMESTAMP para predicción
+			lastReceiveTime = info.SentServerTime;
 		}
 	}
 }
