@@ -2766,6 +2766,7 @@ void UpdateTimers()
 					// Booleanos (actualizar siempre)
 					animator.SetBool("IsRunning", isRunning);
 					animator.SetBool("IsCrouching", isCrouching);
+					animator.SetBool("IsInWater", isInWater);  // ⚠️ CRÍTICO para natación
 					animator.SetBool("IsSwimming", isSwimming);
 					animator.SetBool("IsGrounded", isGrounded);
 					animator.SetBool("IsAttacking", isAttacking);
@@ -2774,7 +2775,7 @@ void UpdateTimers()
 					animator.SetBool("IsDrinking", isDrinking);
 
 					// 🔍 DEBUG: Verificar que se aplicó al animator
-					Debug.Log($"✅ APLICADO AL ANIMATOR - IsGrounded:{animator.GetBool("IsGrounded")} IsSwimming:{animator.GetBool("IsSwimming")} IsInWater:{isInWater}");
+					Debug.Log($"✅ APLICADO AL ANIMATOR - IsGrounded:{animator.GetBool("IsGrounded")} IsSwimming:{animator.GetBool("IsSwimming")} IsInWater:{animator.GetBool("IsInWater")}");
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
