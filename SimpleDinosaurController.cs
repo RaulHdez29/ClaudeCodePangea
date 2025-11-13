@@ -2639,6 +2639,10 @@ void UpdateTimers()
 
 			// 4. FLAGS DE BITS (comprimir booleanos en un solo byte)
 			// Usar bits para reducir 8 booleanos a 1 byte
+
+			// 🔍 DEBUG: Verificar valor ANTES de enviar
+			Debug.Log($"🟡 PREPARANDO ENVÍO - controller.isGrounded:{controller.isGrounded} velocity.y:{velocity.y:F2} position.y:{transform.position.y:F2}");
+
 			byte flags = 0;
 			if (isRunning) flags |= 1 << 0;           // Bit 0
 			if (isCrouching) flags |= 1 << 1;         // Bit 1
@@ -2700,7 +2704,7 @@ void UpdateTimers()
 			stream.SendNext(currentIdleVariation);
 
 			// 🔍 DEBUG: Verificar valores enviados
-			Debug.Log($"🟢 ENVIANDO - IsGrounded:{controller.isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VelY:{velocity.y:F2}");
+			Debug.Log($"🟢 ENVIANDO - IsGrounded:{controller.isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VelY:{velocity.y:F2} IdleVar:{currentIdleVariation:F0}");
 		}
 		else
 		{
@@ -2749,7 +2753,7 @@ void UpdateTimers()
 				float idleVariation = (float)stream.ReceiveNext();
 
 				// 🔍 DEBUG: Verificar valores críticos recibidos
-				Debug.Log($"🔵 RECIBIDO - IsGrounded:{isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VerticalSpeed:{verticalSpeed:F2}");
+				Debug.Log($"🔵 RECIBIDO - IsGrounded:{isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VerticalSpeed:{verticalSpeed:F2} IdleVar:{idleVariation:F0}");
 
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
@@ -2775,7 +2779,7 @@ void UpdateTimers()
 					animator.SetBool("IsDrinking", isDrinking);
 
 					// 🔍 DEBUG: Verificar que se aplicó al animator
-					Debug.Log($"✅ APLICADO AL ANIMATOR - IsGrounded:{animator.GetBool("IsGrounded")} IsSwimming:{animator.GetBool("IsSwimming")} IsInWater:{animator.GetBool("IsInWater")}");
+					Debug.Log($"✅ APLICADO AL ANIMATOR - IsGrounded:{animator.GetBool("IsGrounded")} IsSwimming:{animator.GetBool("IsSwimming")} IsInWater:{animator.GetBool("IsInWater")} IdleVar:{animator.GetFloat("IdleVariation"):F0}");
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
