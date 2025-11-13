@@ -2719,35 +2719,47 @@ void UpdateTimers()
 			// 5. ESTADO ACTUAL (necesario para animaciones)
 			stream.SendNext((byte)currentState);
 
-			// 6. PARÁMETROS DEL ANIMATOR - TODOS LOS NECESARIOS PARA BLEND TREES
-			if (animator != null)
+			// 6. PARÁMETROS DEL ANIMATOR - ENVIAR VARIABLES DIRECTAS (no leer del Animator)
+			// ⚠️ CRÍTICO: Enviar las variables originales, NO leer del Animator
+			// porque el Animator puede tener valores desactualizados o interpolados
+
+			// Speed normalizado (igual que en UpdateAnimations)
+			float normalizedSpeed;
+			if (isPlayingIdleVariation)
 			{
-				// Parámetros de movimiento básico
-				stream.SendNext(animator.GetFloat("Speed"));
-				stream.SendNext(animator.GetFloat("MoveX"));
-				stream.SendNext(animator.GetFloat("MoveZ"));
-
-				// Parámetros de velocidad vertical (para salto)
-				stream.SendNext(animator.GetFloat("VerticalSpeed"));
-
-				// Parámetros de Turn y Look (CRÍTICOS para blend trees)
-				stream.SendNext(animator.GetFloat("Turn"));
-				stream.SendNext(animator.GetFloat("Look"));
-
-				// IdleVariation (para variaciones de idle)
-				stream.SendNext(animator.GetFloat("IdleVariation"));
+				normalizedSpeed = 0f;
 			}
 			else
 			{
-				// Si no hay animator, enviar ceros
-				stream.SendNext(0f); // Speed
-				stream.SendNext(0f); // MoveX
-				stream.SendNext(0f); // MoveZ
-				stream.SendNext(0f); // VerticalSpeed
-				stream.SendNext(0f); // Turn
-				stream.SendNext(0f); // Look
-				stream.SendNext(0f); // IdleVariation
+				normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
 			}
+			stream.SendNext(normalizedSpeed);
+
+			// MoveX y MoveZ (igual que en UpdateAnimations)
+			Vector3 localMove;
+			if (isPlayingIdleVariation || inputVector.magnitude <= 0.1f)
+			{
+				localMove = Vector3.zero;
+			}
+			else
+			{
+				localMove = transform.InverseTransformDirection(currentMoveDirection);
+			}
+			stream.SendNext(localMove.x); // MoveX
+			stream.SendNext(localMove.z); // MoveZ
+
+			// VerticalSpeed (velocidad Y)
+			stream.SendNext(velocity.y);
+
+			// Turn y Look (valores directos de las variables)
+			stream.SendNext(currentTurn);
+			stream.SendNext(currentLook);
+
+			// IdleVariation
+			stream.SendNext(currentIdleVariation);
+
+			// 🔍 DEBUG: Log de valores enviados
+			Debug.Log($"📤 ENVIANDO - Speed:{normalizedSpeed:F2} MoveX:{localMove.x:F2} MoveZ:{localMove.z:F2} Turn:{currentTurn:F2} Look:{currentLook:F2} VelY:{velocity.y:F2}");
 		}
 		else
 		{
@@ -2796,6 +2808,9 @@ void UpdateTimers()
 			// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 			if (animator != null)
 			{
+				// 🔍 DEBUG: Log de valores recibidos
+				Debug.Log($"📥 RECIBIENDO - Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2} Turn:{turn:F2} Look:{look:F2} VelY:{verticalSpeed:F2}");
+
 				// IMPORTANTE: Actualizar SIEMPRE para que los blend trees funcionen correctamente
 				animator.SetFloat("Speed", animSpeed);
 				animator.SetFloat("MoveX", moveX);
@@ -2814,6 +2829,9 @@ void UpdateTimers()
 				animator.SetBool("IsDead", isDead);
 				animator.SetBool("IsEating", isEating);
 				animator.SetBool("IsDrinking", isDrinking);
+
+				// 🔍 DEBUG: Verificar que los valores se establecieron correctamente
+				Debug.Log($"✅ VERIFICADO - Speed en Animator:{animator.GetFloat("Speed"):F2} Turn:{animator.GetFloat("Turn"):F2} Look:{animator.GetFloat("Look"):F2}");
 			}
 
 			// 8. GUARDAR TIMESTAMP para predicción
