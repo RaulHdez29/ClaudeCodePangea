@@ -2680,6 +2680,10 @@ void UpdateTimers()
 	// SOLO envía datos que han CAMBIADO para minimizar tráfico de red
 	public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
 	{
+		// 🔍 DEBUG: Información de red al inicio
+		PhotonView pv = GetComponent<PhotonView>();
+		Debug.Log($"🌐 OnPhotonSerializeView - IsMine:{pv.IsMine} IsWriting:{stream.IsWriting} IsReading:{!stream.IsWriting} Jugadores:{PhotonNetwork.PlayerList.Length} ViewID:{pv.ViewID}");
+
 		if (stream.IsWriting)
 		{
 			// ========================================
@@ -2766,6 +2770,7 @@ void UpdateTimers()
 			// ========================================
 			// RECIBIMOS DATOS (jugador remoto)
 			// ========================================
+			Debug.Log($"📥 INICIANDO RECEPCIÓN DE DATOS - ViewID:{GetComponent<PhotonView>().ViewID} Sender:{info.Sender.NickName}");
 
 			// 1. POSICIÓN Y ROTACIÓN
 			networkPosition = (Vector3)stream.ReceiveNext();
