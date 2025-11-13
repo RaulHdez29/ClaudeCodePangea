@@ -2807,7 +2807,12 @@ void UpdateTimers()
 
 				// 5. ESTADO ACTUAL
 				Debug.Log("📥 Paso 6: Recibiendo estado actual...");
-				currentState = (MovementState)stream.ReceiveNext();
+				object stateObj = stream.ReceiveNext();
+				Debug.Log($"📥 Paso 6.1: Estado recibido como object: {stateObj} (Tipo: {stateObj.GetType().Name})");
+				byte stateByte = (byte)stateObj;
+				Debug.Log($"📥 Paso 6.2: Estado como byte: {stateByte}");
+				currentState = (MovementState)stateByte;
+				Debug.Log($"📥 Paso 6.3: Estado convertido a enum: {currentState}");
 
 				// 6. PARÁMETROS DEL ANIMATOR
 				Debug.Log("📥 Paso 7: Recibiendo parámetros del animator...");
