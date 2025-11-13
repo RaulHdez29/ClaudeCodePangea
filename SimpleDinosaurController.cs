@@ -49,6 +49,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     // Timestamp para predicción
     private double lastReceiveTime;
 
+    // 🔍 DEBUG: Para detectar cambios de isGrounded
+    private bool lastGroundedState = true;
+
     [Header("Referencias")]
     public Animator animator;
     public AudioSource audioSource;
@@ -1123,6 +1126,13 @@ void ApplyMovement()
             hasJumped = false;
         }
     }
+
+    // 🔍 DEBUG: Detectar cambios de isGrounded
+    if (controller.isGrounded != lastGroundedState)
+    {
+        lastGroundedState = controller.isGrounded;
+        Debug.Log($"🟢 CAMBIO IsGrounded - IsMine:{photonView.IsMine} Nuevo:{controller.isGrounded} VelY:{velocity.y:F2} Pos.y:{transform.position.y:F2}");
+    }
 }
 
 
@@ -1438,6 +1448,9 @@ void UpdateAnimations()
             // Verificar si es tiempo de terminar la variation
             if (idleVariationTimer >= currentAnimationDuration)
             {
+                // 🔍 DEBUG: Log al desactivar idle variation
+                Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (IdleVar:0)");
+
                 currentIdleVariation = 0f;
                 currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
@@ -1474,6 +1487,9 @@ void UpdateAnimations()
                     currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
                     isPlayingIdleVariation = true;
                     idleVariationTimer = 0f;
+
+                    // 🔍 DEBUG: Log al activar idle variation
+                    Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{randomVariationNumber} (IdleVar:{currentIdleVariation})");
 
                     // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
                     // Esto previene que la animación empiece desde la mitad
@@ -1773,6 +1789,9 @@ void RPC_DoJump()
     canJump = false;
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
+
+    // 🔍 DEBUG: Log al ejecutar salto
+    Debug.Log($"🔴 SALTO EJECUTADO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{velocity.y:F2}");
 
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
@@ -2639,10 +2658,6 @@ void UpdateTimers()
 
 			// 4. FLAGS DE BITS (comprimir booleanos en un solo byte)
 			// Usar bits para reducir 8 booleanos a 1 byte
-
-			// 🔍 DEBUG: Verificar valor ANTES de enviar
-			Debug.Log($"🟡 PREPARANDO ENVÍO - controller.isGrounded:{controller.isGrounded} velocity.y:{velocity.y:F2} position.y:{transform.position.y:F2}");
-
 			byte flags = 0;
 			if (isRunning) flags |= 1 << 0;           // Bit 0
 			if (isCrouching) flags |= 1 << 1;         // Bit 1
@@ -2702,9 +2717,6 @@ void UpdateTimers()
 
 			// IdleVariation
 			stream.SendNext(currentIdleVariation);
-
-			// 🔍 DEBUG: Verificar valores enviados
-			Debug.Log($"🟢 ENVIANDO - IsGrounded:{controller.isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VelY:{velocity.y:F2} IdleVar:{currentIdleVariation:F0}");
 		}
 		else
 		{
@@ -2752,9 +2764,6 @@ void UpdateTimers()
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
 
-				// 🔍 DEBUG: Verificar valores críticos recibidos
-				Debug.Log($"🔵 RECIBIDO - IsGrounded:{isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VerticalSpeed:{verticalSpeed:F2} IdleVar:{idleVariation:F0}");
-
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
@@ -2777,9 +2786,6 @@ void UpdateTimers()
 					animator.SetBool("IsDead", isDead);
 					animator.SetBool("IsEating", isEating);
 					animator.SetBool("IsDrinking", isDrinking);
-
-					// 🔍 DEBUG: Verificar que se aplicó al animator
-					Debug.Log($"✅ APLICADO AL ANIMATOR - IsGrounded:{animator.GetBool("IsGrounded")} IsSwimming:{animator.GetBool("IsSwimming")} IsInWater:{animator.GetBool("IsInWater")} IdleVar:{animator.GetFloat("IdleVariation"):F0}");
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
