@@ -2698,6 +2698,9 @@ void UpdateTimers()
 
 			// IdleVariation
 			stream.SendNext(currentIdleVariation);
+
+			// 🔍 DEBUG: Verificar valores enviados
+			Debug.Log($"🟢 ENVIANDO - IsGrounded:{controller.isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VelY:{velocity.y:F2}");
 		}
 		else
 		{
@@ -2745,6 +2748,9 @@ void UpdateTimers()
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
 
+				// 🔍 DEBUG: Verificar valores críticos recibidos
+				Debug.Log($"🔵 RECIBIDO - IsGrounded:{isGrounded} IsSwimming:{isSwimming} IsInWater:{isInWater} VerticalSpeed:{verticalSpeed:F2}");
+
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
@@ -2766,6 +2772,9 @@ void UpdateTimers()
 					animator.SetBool("IsDead", isDead);
 					animator.SetBool("IsEating", isEating);
 					animator.SetBool("IsDrinking", isDrinking);
+
+					// 🔍 DEBUG: Verificar que se aplicó al animator
+					Debug.Log($"✅ APLICADO AL ANIMATOR - IsGrounded:{animator.GetBool("IsGrounded")} IsSwimming:{animator.GetBool("IsSwimming")} IsInWater:{isInWater}");
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
