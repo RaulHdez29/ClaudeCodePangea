@@ -1783,14 +1783,14 @@ private void DoJump()
 }
 
 [PunRPC]
-void RPC_DoJump()
+public void RPC_DoJump()
 {
     velocity.y = Mathf.Sqrt(Mathf.Max(0.0001f, jumpHeight) * -2f * gravity);
     canJump = false;
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
 
-    // 🔍 DEBUG: Log al ejecutar salto
+    // 🔍 DEBUG: Log al ejecutar salto (ahora se verá en TODOS los clientes)
     Debug.Log($"🔴 SALTO EJECUTADO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{velocity.y:F2}");
 
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
@@ -2764,6 +2764,19 @@ void UpdateTimers()
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
 
+
+				// 🔍 DEBUG: Log cuando cambia idle variation en clientes remotos
+				if (idleVariation != currentIdleVariation && idleVariation > 0)
+				{
+					Debug.Log($"🎭 IDLE VARIATION RECIBIDA - IsMine:{photonView.IsMine} Variation#{(int)idleVariation} (IdleVar:{idleVariation})");
+				}
+				else if (idleVariation == 0 && currentIdleVariation > 0)
+				{
+					Debug.Log($"🎭 IDLE VARIATION FIN RECIBIDO - IsMine:{photonView.IsMine} Regresando a idle normal (IdleVar:0)");
+				}
+
+				// Actualizar variable local para futuros debugs
+				currentIdleVariation = idleVariation;
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
