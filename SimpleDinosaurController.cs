@@ -1796,6 +1796,9 @@ private void DoJump()
 [PunRPC]
 void RPC_DoJump()
 {
+    // ⭐ DEBUG: Verificar que el RPC se ejecuta en ambos lados
+    Debug.Log($"⭐ RPC_DoJump LLAMADO - IsMine:{photonView.IsMine}");
+
     velocity.y = Mathf.Sqrt(Mathf.Max(0.0001f, jumpHeight) * -2f * gravity);
     canJump = false;
     hasJumped = true;
@@ -2659,6 +2662,9 @@ void UpdateTimers()
 	// SOLO envía datos que han CAMBIADO para minimizar tráfico de red
 	public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
 	{
+		// ⭐ DEBUG: Verificar que este método se ejecuta en ambos lados
+		Debug.Log($"⭐ OnPhotonSerializeView LLAMADO - IsMine:{photonView.IsMine} IsWriting:{stream.IsWriting}");
+
 		if (stream.IsWriting)
 		{
 			// ========================================
