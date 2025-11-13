@@ -2674,9 +2674,6 @@ void UpdateTimers()
 	// SOLO envía datos que han CAMBIADO para minimizar tráfico de red
 	public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
 	{
-		// ⭐ DEBUG: Verificar que este método se ejecuta en ambos lados
-		Debug.Log($"⭐ OnPhotonSerializeView LLAMADO - IsMine:{photonView.IsMine} IsWriting:{stream.IsWriting}");
-
 		if (stream.IsWriting)
 		{
 			// ========================================
@@ -2704,6 +2701,12 @@ void UpdateTimers()
 			if (controller.isGrounded) flags |= 1 << 5; // Bit 5
 			if (isDead) flags |= 1 << 6;              // Bit 6
 			if (isCalling) flags |= 1 << 7;           // Bit 7
+
+			// 🔍 DEBUG: Log solo cuando hay actividad vertical significativa
+			if (Mathf.Abs(controller.velocity.y) > 0.5f)
+			{
+				Debug.Log($"📤 ENVIANDO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{controller.velocity.y:F2} Pos.y:{transform.position.y:F2}");
+			}
 
 			stream.SendNext(flags);
 
