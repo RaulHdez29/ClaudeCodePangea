@@ -1807,10 +1807,18 @@ void RPC_DoJump()
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
     {
+        // ⚠️ CRÍTICO: En jugadores remotos, forzar actualización de IsGrounded ANTES del trigger
+        if (!photonView.IsMine)
+        {
+            animator.SetBool("IsGrounded", controller.isGrounded);
+        }
+
         animator.ResetTrigger("Jump");
         animator.SetTrigger("Jump");
         animator.SetFloat("VerticalSpeed", velocity.y);
-        // NOTA: IsGrounded se actualiza automáticamente en UpdateAnimations() cada frame
+
+        // 🔍 DEBUG: Verificar estado del Animator al saltar
+        Debug.Log($"🔴 ANIMATOR AL SALTAR - IsMine:{photonView.IsMine} Speed:{animator.GetFloat("Speed"):F2} IsGrounded:{animator.GetBool("IsGrounded")} VelSpeed:{animator.GetFloat("VerticalSpeed"):F2}");
     }
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
@@ -2776,11 +2784,12 @@ void UpdateTimers()
 				float idleVariation = (float)stream.ReceiveNext();
 
 				// 🔍 DEBUG: Detectar cambios de idle variation
-				if (Mathf.Abs(currentIdleVariation - idleVariation) > 0.1f)
+				bool idleVariationChanged = Mathf.Abs(currentIdleVariation - idleVariation) > 0.1f;
+				if (idleVariationChanged)
 				{
 					if (idleVariation > 0.1f)
 					{
-						Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{idleVariation:F0} (RECIBIDO)");
+						Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{idleVariation:F0} (RECIBIDO) Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2}");
 					}
 					else if (currentIdleVariation > 0.1f)
 					{
@@ -2790,6 +2799,7 @@ void UpdateTimers()
 
 				// Actualizar valor local de idle variation
 				currentIdleVariation = idleVariation;
+				isPlayingIdleVariation = idleVariation > 0.1f;
 
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
