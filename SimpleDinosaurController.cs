@@ -447,6 +447,23 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // 🌐 Obtener PhotonView
         photonView = GetComponent<PhotonView>();
 
+        // ⚠️ CRÍTICO: Asignar componentes esenciales ANTES de cualquier return
+        // Estos componentes son necesarios tanto para jugadores locales como remotos
+        controller = GetComponent<CharacterController>();
+        if (controller == null)
+        {
+            controller = gameObject.AddComponent<CharacterController>();
+            controller.height = 2f;
+            controller.center = new Vector3(0, 1f, 0);
+            controller.radius = 0.5f;
+        }
+
+        if (animator == null)
+            animator = GetComponent<Animator>();
+
+        // ⭐ DEBUG: Verificar asignación de componentes
+        Debug.Log($"⭐ START COMPLETE - IsMine:{photonView.IsMine} Animator:{(animator != null ? "OK" : "NULL")} Controller:{(controller != null ? "OK" : "NULL")}");
+
         // 🌐 Solo configurar controles para el jugador local
         if (!photonView.IsMine)
         {
@@ -478,18 +495,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
             return; // No ejecutar el resto del Start para jugadores remotos
         }
-
-        controller = GetComponent<CharacterController>();
-        if (controller == null)
-        {
-            controller = gameObject.AddComponent<CharacterController>();
-            controller.height = 2f;
-            controller.center = new Vector3(0, 1f, 0);
-            controller.radius = 0.5f;
-        }
-
-        if (animator == null)
-            animator = GetComponent<Animator>();
 
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
@@ -1807,6 +1812,9 @@ void RPC_DoJump()
     // 🔍 DEBUG: Log al ejecutar salto
     Debug.Log($"🔴 SALTO EJECUTADO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{velocity.y:F2}");
 
+    // ⭐ DEBUG: Verificar si animator existe
+    Debug.Log($"⭐ ANIMATOR CHECK - IsMine:{photonView.IsMine} animator:{(animator != null ? "EXISTS" : "NULL")}");
+
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
     {
@@ -1822,6 +1830,10 @@ void RPC_DoJump()
 
         // 🔍 DEBUG: Verificar estado del Animator al saltar
         Debug.Log($"🔴 ANIMATOR AL SALTAR - IsMine:{photonView.IsMine} Speed:{animator.GetFloat("Speed"):F2} IsGrounded:{animator.GetBool("IsGrounded")} VelSpeed:{animator.GetFloat("VerticalSpeed"):F2}");
+    }
+    else
+    {
+        Debug.LogError($"❌ ANIMATOR ES NULL - IsMine:{photonView.IsMine} - ¡El componente Animator no está asignado!");
     }
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
