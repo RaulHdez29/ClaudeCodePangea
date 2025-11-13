@@ -49,9 +49,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     // Timestamp para predicción
     private double lastReceiveTime;
 
-    // 🔍 DEBUG: Para detectar cambios de isGrounded
-    private bool lastGroundedState = true;
-
     [Header("Referencias")]
     public Animator animator;
     public AudioSource audioSource;
@@ -461,9 +458,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         if (animator == null)
             animator = GetComponent<Animator>();
 
-        // ⭐ DEBUG: Verificar asignación de componentes
-        Debug.Log($"⭐ START COMPLETE - IsMine:{photonView.IsMine} Animator:{(animator != null ? "OK" : "NULL")} Controller:{(controller != null ? "OK" : "NULL")}");
-
         // 🌐 Solo configurar controles para el jugador local
         if (!photonView.IsMine)
         {
@@ -750,13 +744,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             // ⚠️ HACK: Forzar actualización de controller.isGrounded
             // Aplicar un movimiento minúsculo hacia abajo para que Unity actualice las colisiones
             controller.Move(Vector3.down * 0.001f);
-
-            // 🔍 DEBUG: Detectar cambios de isGrounded en remotos
-            if (controller.isGrounded != lastGroundedState)
-            {
-                lastGroundedState = controller.isGrounded;
-                Debug.Log($"🟢 CAMBIO IsGrounded - IsMine:{photonView.IsMine} Nuevo:{controller.isGrounded} Pos.y:{transform.position.y:F2}");
-            }
 
             return; // No ejecutar lógica de control para jugadores remotos
         }
@@ -1143,12 +1130,6 @@ void ApplyMovement()
         }
     }
 
-    // 🔍 DEBUG: Detectar cambios de isGrounded
-    if (controller.isGrounded != lastGroundedState)
-    {
-        lastGroundedState = controller.isGrounded;
-        Debug.Log($"🟢 CAMBIO IsGrounded - IsMine:{photonView.IsMine} Nuevo:{controller.isGrounded} VelY:{velocity.y:F2} Pos.y:{transform.position.y:F2}");
-    }
 }
 
 
@@ -1464,9 +1445,6 @@ void UpdateAnimations()
             // Verificar si es tiempo de terminar la variation
             if (idleVariationTimer >= currentAnimationDuration)
             {
-                // 🔍 DEBUG: Log al desactivar idle variation
-                Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (IdleVar:0)");
-
                 currentIdleVariation = 0f;
                 currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
@@ -1503,9 +1481,6 @@ void UpdateAnimations()
                     currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
                     isPlayingIdleVariation = true;
                     idleVariationTimer = 0f;
-
-                    // 🔍 DEBUG: Log al activar idle variation
-                    Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{randomVariationNumber} (IdleVar:{currentIdleVariation})");
 
                     // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
                     // Esto previene que la animación empiece desde la mitad
@@ -1801,19 +1776,10 @@ private void DoJump()
 [PunRPC]
 void RPC_DoJump()
 {
-    // ⭐ DEBUG: Verificar que el RPC se ejecuta en ambos lados
-    Debug.Log($"⭐ RPC_DoJump LLAMADO - IsMine:{photonView.IsMine}");
-
     velocity.y = Mathf.Sqrt(Mathf.Max(0.0001f, jumpHeight) * -2f * gravity);
     canJump = false;
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
-
-    // 🔍 DEBUG: Log al ejecutar salto
-    Debug.Log($"🔴 SALTO EJECUTADO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{velocity.y:F2}");
-
-    // ⭐ DEBUG: Verificar si animator existe
-    Debug.Log($"⭐ ANIMATOR CHECK - IsMine:{photonView.IsMine} animator:{(animator != null ? "EXISTS" : "NULL")}");
 
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
@@ -1827,13 +1793,6 @@ void RPC_DoJump()
         animator.ResetTrigger("Jump");
         animator.SetTrigger("Jump");
         animator.SetFloat("VerticalSpeed", velocity.y);
-
-        // 🔍 DEBUG: Verificar estado del Animator al saltar
-        Debug.Log($"🔴 ANIMATOR AL SALTAR - IsMine:{photonView.IsMine} Speed:{animator.GetFloat("Speed"):F2} IsGrounded:{animator.GetBool("IsGrounded")} VelSpeed:{animator.GetFloat("VerticalSpeed"):F2}");
-    }
-    else
-    {
-        Debug.LogError($"❌ ANIMATOR ES NULL - IsMine:{photonView.IsMine} - ¡El componente Animator no está asignado!");
     }
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
@@ -2702,12 +2661,6 @@ void UpdateTimers()
 			if (isDead) flags |= 1 << 6;              // Bit 6
 			if (isCalling) flags |= 1 << 7;           // Bit 7
 
-			// 🔍 DEBUG: Log solo cuando hay actividad vertical significativa
-			if (Mathf.Abs(controller.velocity.y) > 0.5f)
-			{
-				Debug.Log($"📤 ENVIANDO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{controller.velocity.y:F2} Pos.y:{transform.position.y:F2}");
-			}
-
 			stream.SendNext(flags);
 
 			// Segundo byte de flags para estados adicionales
@@ -2804,20 +2757,6 @@ void UpdateTimers()
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
 
-				// 🔍 DEBUG: Detectar cambios de idle variation
-				bool idleVariationChanged = Mathf.Abs(currentIdleVariation - idleVariation) > 0.1f;
-				if (idleVariationChanged)
-				{
-					if (idleVariation > 0.1f)
-					{
-						Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{idleVariation:F0} (RECIBIDO) Speed:{animSpeed:F2} MoveX:{moveX:F2} MoveZ:{moveZ:F2} IsGrounded:{isGrounded}");
-					}
-					else if (currentIdleVariation > 0.1f)
-					{
-						Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (RECIBIDO) Speed:{animSpeed:F2}");
-					}
-				}
-
 				// Actualizar valor local de idle variation
 				currentIdleVariation = idleVariation;
 				isPlayingIdleVariation = idleVariation > 0.1f;
@@ -2825,13 +2764,6 @@ void UpdateTimers()
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
-					// 🔍 DEBUG: Detectar cambio de IsGrounded (especialmente False → True después de salto)
-					bool prevGrounded = animator.GetBool("IsGrounded");
-					if (prevGrounded != isGrounded)
-					{
-						Debug.Log($"🟢 ISGROUNDED CAMBIÓ EN ANIMATOR - IsMine:{photonView.IsMine} Anterior:{prevGrounded} Nuevo:{isGrounded} VelY:{verticalSpeed:F2}");
-					}
-
 					// Actualizar SIEMPRE para que los blend trees funcionen correctamente
 					animator.SetFloat("Speed", animSpeed);
 					animator.SetFloat("MoveX", moveX);
@@ -2851,13 +2783,6 @@ void UpdateTimers()
 					animator.SetBool("IsDead", isDead);
 					animator.SetBool("IsEating", isEating);
 					animator.SetBool("IsDrinking", isDrinking);
-
-					// 🔍 DEBUG: Log después de actualizar todos los parámetros (solo si hay cambios significativos)
-					if (prevGrounded != isGrounded || Mathf.Abs(verticalSpeed) > 0.1f)
-					{
-						AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(0);
-						Debug.Log($"🎬 ANIMATOR STATE - IsMine:{photonView.IsMine} State:{stateInfo.shortNameHash} IsGrounded:{isGrounded} Speed:{animSpeed:F2} VelY:{verticalSpeed:F2}");
-					}
 				}
 
 				// 8. GUARDAR TIMESTAMP para predicción
