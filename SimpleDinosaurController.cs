@@ -30,6 +30,34 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Tooltip("Ángulo mínimo para sincronizar rotación (grados)")]
     public float rotationThreshold = 2f;
 
+    [Header("🌐 Interest Management (Grid-Based)")]
+    [Tooltip("Activar Interest Management para reducir tráfico de red")]
+    public bool enableInterestManagement = true;
+
+    [Tooltip("Tamaño de cada celda del grid (metros)")]
+    [Range(10f, 100f)]
+    public float gridCellSize = 50f;
+
+    [Tooltip("Radio de celdas adyacentes a sincronizar (0 = solo celda actual, 1 = celdas vecinas, 2 = 2 celdas de distancia)")]
+    [Range(0, 3)]
+    public int adjacentRadius = 1;
+
+    [Tooltip("Tiempo máximo sin update antes de forzar sincronización (segundos)")]
+    [Range(0.5f, 5f)]
+    public float maxTimeWithoutUpdate = 2f;
+
+    [Tooltip("Mostrar grid en el Scene view (solo en Editor)")]
+    public bool showGridGizmos = true;
+
+    [Tooltip("Color del grid en Gizmos")]
+    public Color gridGizmoColor = new Color(0f, 1f, 0f, 0.3f);
+
+    // Variables internas del Interest Management
+    private Vector2Int currentGridCell = Vector2Int.zero;
+    private Vector2Int lastGridCell = Vector2Int.zero;
+    private float timeSinceLastUpdate = 0f;
+    private int currentInterestGroup = 0;
+
     // Variables de red para interpolación
     private Vector3 networkPosition;
     private Quaternion networkRotation;
@@ -803,6 +831,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
         // Actualizar animaciones
         UpdateAnimations();
+
+        // 🌐 Actualizar Interest Management (reducir tráfico de red)
+        UpdateInterestManagement();
 
         // Actualizar sistema de ataque
         UpdateAttackSystem();
@@ -2723,6 +2754,12 @@ void UpdateTimers()
 
 			// IdleVariation
 			stream.SendNext(currentIdleVariation);
+
+			// 🌐 Guardar valores enviados para delta compression
+			networkPosition = transform.position;
+			networkRotation = transform.rotation;
+			lastNetworkSpeed = currentSpeed;
+			lastNetworkState = (int)currentState;
 		}
 		else
 		{
@@ -2805,6 +2842,219 @@ void UpdateTimers()
 			{
 				Debug.LogError($"ERROR en OnPhotonSerializeView (recepción): {e.Message}");
 			}
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 🌐 INTEREST MANAGEMENT SYSTEM (Grid-Based)
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza el Interest Management cada frame
+	/// Calcula la celda actual y actualiza grupos de interés
+	/// </summary>
+	void UpdateInterestManagement()
+	{
+		if (!enableInterestManagement || !photonView.IsMine)
+			return;
+
+		// Calcular celda actual del grid
+		currentGridCell = GetGridCell(transform.position);
+
+		// Si cambió de celda, actualizar Interest Group
+		if (currentGridCell != lastGridCell)
+		{
+			UpdateInterestGroup();
+			lastGridCell = currentGridCell;
+		}
+
+		// Actualizar timer
+		timeSinceLastUpdate += Time.deltaTime;
+	}
+
+	/// <summary>
+	/// Calcula en qué celda del grid está una posición
+	/// </summary>
+	Vector2Int GetGridCell(Vector3 position)
+	{
+		int cellX = Mathf.FloorToInt(position.x / gridCellSize);
+		int cellZ = Mathf.FloorToInt(position.z / gridCellSize);
+		return new Vector2Int(cellX, cellZ);
+	}
+
+	/// <summary>
+	/// Calcula el Interest Group basado en la celda actual
+	/// Usa un hash para convertir coordenadas 2D en un ID único
+	/// </summary>
+	int CalculateInterestGroup(Vector2Int cell)
+	{
+		// Hash simple pero efectivo: combinar X e Y
+		// Photon soporta hasta 255 grupos, así que usar módulo para mantener en rango
+		int hash = (cell.x * 73856093) ^ (cell.y * 19349663);
+		return Mathf.Abs(hash) % 255 + 1; // Photon usa grupos 1-255 (0 está reservado)
+	}
+
+	/// <summary>
+	/// Actualiza los Interest Groups de Photon basado en la posición actual
+	/// Incluye celda actual + celdas adyacentes según adjacentRadius
+	/// </summary>
+	void UpdateInterestGroup()
+	{
+		// Remover de todos los grupos anteriores
+		if (currentInterestGroup != 0)
+		{
+			photonView.ObservedComponents.Clear();
+			PhotonNetwork.SetInterestGroups(new byte[] { }, null);
+		}
+
+		// Lista de grupos a los que pertenecer y escuchar
+		List<byte> groupsToJoin = new List<byte>();
+		List<byte> groupsToListen = new List<byte>();
+
+		// Agregar celda actual + celdas adyacentes
+		for (int x = -adjacentRadius; x <= adjacentRadius; x++)
+		{
+			for (int z = -adjacentRadius; z <= adjacentRadius; z++)
+			{
+				Vector2Int cell = currentGridCell + new Vector2Int(x, z);
+				int groupId = CalculateInterestGroup(cell);
+
+				// Unirse al grupo de la celda actual
+				if (x == 0 && z == 0)
+				{
+					groupsToJoin.Add((byte)groupId);
+					currentInterestGroup = groupId;
+				}
+
+				// Escuchar todas las celdas en el radio
+				groupsToListen.Add((byte)groupId);
+			}
+		}
+
+		// Actualizar Photon Interest Groups
+		photonView.Group = (byte)currentInterestGroup;
+		PhotonNetwork.SetInterestGroups(groupsToListen.ToArray(), groupsToJoin.ToArray());
+	}
+
+	/// <summary>
+	/// Verifica si debe enviar update basado en delta compression
+	/// </summary>
+	bool ShouldSendUpdate()
+	{
+		// Si Interest Management está desactivado, siempre enviar
+		if (!enableInterestManagement)
+			return true;
+
+		// Si pasó mucho tiempo, forzar update
+		if (timeSinceLastUpdate >= maxTimeWithoutUpdate)
+		{
+			timeSinceLastUpdate = 0f;
+			return true;
+		}
+
+		// Verificar cambios significativos
+		bool positionChanged = Vector3.Distance(transform.position, networkPosition) > positionThreshold;
+		bool rotationChanged = Quaternion.Angle(transform.rotation, networkRotation) > rotationThreshold;
+		bool speedChanged = Mathf.Abs(currentSpeed - lastNetworkSpeed) > 0.1f;
+		bool stateChanged = ((int)currentState) != lastNetworkState;
+
+		if (positionChanged || rotationChanged || speedChanged || stateChanged)
+		{
+			timeSinceLastUpdate = 0f;
+			return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>
+	/// Dibuja el grid en el Scene view para visualización
+	/// </summary>
+	void OnDrawGizmos()
+	{
+		if (!showGridGizmos || !enableInterestManagement)
+			return;
+
+		Gizmos.color = gridGizmoColor;
+
+		// Obtener celda actual
+		Vector2Int myCell = GetGridCell(transform.position);
+
+		// Dibujar grid alrededor del jugador
+		int drawRadius = adjacentRadius + 2; // Dibujar un poco más allá del radius
+		for (int x = -drawRadius; x <= drawRadius; x++)
+		{
+			for (int z = -drawRadius; z <= drawRadius; z++)
+			{
+				Vector2Int cell = myCell + new Vector2Int(x, z);
+				Vector3 cellCenter = new Vector3(
+					cell.x * gridCellSize + gridCellSize * 0.5f,
+					transform.position.y,
+					cell.y * gridCellSize + gridCellSize * 0.5f
+				);
+
+				// Color diferente para celda actual y celdas en rango
+				if (x == 0 && z == 0)
+				{
+					// Celda actual - Verde brillante
+					Gizmos.color = new Color(0f, 1f, 0f, 0.8f);
+					DrawWireCube(cellCenter, new Vector3(gridCellSize, 0.1f, gridCellSize));
+				}
+				else if (Mathf.Abs(x) <= adjacentRadius && Mathf.Abs(z) <= adjacentRadius)
+				{
+					// Celdas en rango - Amarillo
+					Gizmos.color = new Color(1f, 1f, 0f, 0.5f);
+					DrawWireCube(cellCenter, new Vector3(gridCellSize, 0.1f, gridCellSize));
+				}
+				else
+				{
+					// Celdas fuera de rango - Gris claro
+					Gizmos.color = new Color(0.5f, 0.5f, 0.5f, 0.2f);
+					DrawWireCube(cellCenter, new Vector3(gridCellSize, 0.1f, gridCellSize));
+				}
+			}
+		}
+
+		// Dibujar radio de visibilidad
+		Gizmos.color = new Color(0f, 1f, 1f, 0.3f);
+		float visibilityRadius = gridCellSize * (adjacentRadius + 0.5f);
+		DrawWireCircle(transform.position, visibilityRadius);
+	}
+
+	/// <summary>
+	/// Dibuja un cubo en modo wireframe
+	/// </summary>
+	void DrawWireCube(Vector3 center, Vector3 size)
+	{
+		Vector3 halfSize = size * 0.5f;
+		Vector3[] corners = new Vector3[8];
+
+		corners[0] = center + new Vector3(-halfSize.x, 0, -halfSize.z);
+		corners[1] = center + new Vector3(halfSize.x, 0, -halfSize.z);
+		corners[2] = center + new Vector3(halfSize.x, 0, halfSize.z);
+		corners[3] = center + new Vector3(-halfSize.x, 0, halfSize.z);
+
+		Gizmos.DrawLine(corners[0], corners[1]);
+		Gizmos.DrawLine(corners[1], corners[2]);
+		Gizmos.DrawLine(corners[2], corners[3]);
+		Gizmos.DrawLine(corners[3], corners[0]);
+	}
+
+	/// <summary>
+	/// Dibuja un círculo en modo wireframe
+	/// </summary>
+	void DrawWireCircle(Vector3 center, float radius)
+	{
+		int segments = 32;
+		float angleStep = 360f / segments;
+		Vector3 prevPoint = center + new Vector3(radius, 0, 0);
+
+		for (int i = 1; i <= segments; i++)
+		{
+			float angle = angleStep * i * Mathf.Deg2Rad;
+			Vector3 newPoint = center + new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+			Gizmos.DrawLine(prevPoint, newPoint);
+			prevPoint = newPoint;
 		}
 	}
 }
