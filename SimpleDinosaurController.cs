@@ -1376,6 +1376,11 @@ void UpdateAnimations()
     /// </summary>
     void UpdateIdleVariations()
     {
+        // 🌐 CRÍTICO: Solo el jugador LOCAL debe generar idle variations
+        // Los jugadores remotos recibirán la sincronización vía RPC
+        if (!photonView.IsMine)
+            return;
+
         if (!enableIdleVariations || animator == null || numberOfIdleVariations <= 0)
         {
             // Si está desactivado, asegurar que esté en idle normal (0)
@@ -1477,22 +1482,9 @@ void UpdateAnimations()
 
                     // ✅ Seleccionar idle variation aleatoria (1 a numberOfIdleVariations)
                     int randomVariationNumber = Random.Range(1, numberOfIdleVariations + 1);
-                    currentIdleVariation = (float)randomVariationNumber;
-                    currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
-                    isPlayingIdleVariation = true;
-                    idleVariationTimer = 0f;
 
-                    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
-                    // Esto previene que la animación empiece desde la mitad
-                    if (!string.IsNullOrEmpty(idleStateNameInAnimator))
-                    {
-                        // Play el estado actual con normalizedTime = 0 (frame 0)
-                        animator.Play(idleStateNameInAnimator, 0, 0f);
-                    }
-                    else
-                    {
-                        Debug.LogWarning("⚠️ idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Configura el nombre del estado en el Inspector.");
-                    }
+                    // 🌐 LLAMAR RPC para sincronizar en TODOS los clientes (incluyendo este)
+                    photonView.RPC("RPC_PlayIdleVariation", RpcTarget.All, randomVariationNumber, savedTurnBeforeVariation, savedLookBeforeVariation);
                 }
                 else
                 {
@@ -1797,6 +1789,27 @@ void RPC_DoJump()
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
     PlayJumpSound();
+}
+
+// 🌐 RPC: Sincronizar idle variation en TODOS los clientes
+[PunRPC]
+void RPC_PlayIdleVariation(int variationNumber, float savedTurn, float savedLook)
+{
+    // Actualizar variables
+    currentIdleVariation = (float)variationNumber;
+    currentIdleVariationIndex = variationNumber - 1; // Convertir a índice 0-based
+    isPlayingIdleVariation = true;
+    idleVariationTimer = 0f;
+
+    // 💾 Guardar valores de Turn/Look
+    savedTurnBeforeVariation = savedTurn;
+    savedLookBeforeVariation = savedLook;
+
+    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
+    if (animator != null && !string.IsNullOrEmpty(idleStateNameInAnimator))
+    {
+        animator.Play(idleStateNameInAnimator, 0, 0f);
+    }
 }
 
 void UpdateTimers()
