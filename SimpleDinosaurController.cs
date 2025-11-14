@@ -30,6 +30,65 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Tooltip("Ángulo mínimo para sincronizar rotación (grados)")]
     public float rotationThreshold = 2f;
 
+    [Header("🌐 Interest Management (Grid-Based)")]
+    [Tooltip("Activar Interest Management para reducir tráfico de red")]
+    public bool enableInterestManagement = true;
+
+    [Tooltip("Tamaño de cada celda del grid (metros)")]
+    [Range(10f, 100f)]
+    public float gridCellSize = 50f;
+
+    [Tooltip("Radio de celdas adyacentes a sincronizar (0 = solo celda actual, 1 = celdas vecinas, 2 = 2 celdas de distancia)")]
+    [Range(0, 3)]
+    public int adjacentRadius = 1;
+
+    [Tooltip("Tiempo máximo sin update antes de forzar sincronización (segundos)")]
+    [Range(0.5f, 5f)]
+    public float maxTimeWithoutUpdate = 2f;
+
+    [Tooltip("Mostrar grid en el Scene view (solo en Editor)")]
+    public bool showGridGizmos = true;
+
+    [Tooltip("Color del grid en Gizmos")]
+    public Color gridGizmoColor = new Color(0f, 1f, 0f, 0.3f);
+
+    // Variables internas del Interest Management
+    private Vector2Int currentGridCell = Vector2Int.zero;
+    private Vector2Int lastGridCell = Vector2Int.zero;
+    private float timeSinceLastUpdate = 0f;
+    private int currentInterestGroup = 0;
+
+    [Header("🌐 Visibility Culling (Auto Hide/Show)")]
+    [Tooltip("Activar sistema de ocultación automática de modelos")]
+    public bool enableVisibilityCulling = true;
+
+    [Tooltip("Tiempo sin updates de red antes de ocultar el modelo (segundos)")]
+    [Range(0.5f, 5f)]
+    public float visibilityTimeout = 2f;
+
+    [Tooltip("Usar efecto de fade in/out suave")]
+    public bool useFadeEffect = true;
+
+    [Tooltip("Duración del fade in al aparecer (segundos)")]
+    [Range(0.1f, 1f)]
+    public float fadeInDuration = 0.3f;
+
+    [Tooltip("Duración del fade out al desaparecer (segundos)")]
+    [Range(0.1f, 1f)]
+    public float fadeOutDuration = 0.3f;
+
+    // Variables internas del Visibility Culling
+    private bool isModelVisible = false;
+    private float lastNetworkUpdateTime = 0f;
+    private bool hasReceivedFirstUpdate = false; // Track si ya recibió al menos 1 update de red
+    private Renderer[] cachedRenderers;
+    private bool renderersAreCached = false;
+    private bool isFading = false;
+    private float fadeProgress = 0f;
+    private bool isFadingIn = false;
+    private Dictionary<Renderer, Material[]> originalMaterials;
+    private Dictionary<Renderer, Material[]> fadeMaterials;
+
     // Variables de red para interpolación
     private Vector3 networkPosition;
     private Quaternion networkRotation;
@@ -48,9 +107,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     // Timestamp para predicción
     private double lastReceiveTime;
-
-    // 🔍 DEBUG: Para detectar cambios de isGrounded
-    private bool lastGroundedState = true;
 
     [Header("Referencias")]
     public Animator animator;
@@ -447,6 +503,49 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // 🌐 Obtener PhotonView
         photonView = GetComponent<PhotonView>();
 
+        // ⚠️ CRÍTICO: Asignar componentes esenciales ANTES de cualquier return
+        // Estos componentes son necesarios tanto para jugadores locales como remotos
+        controller = GetComponent<CharacterController>();
+        if (controller == null)
+        {
+            controller = gameObject.AddComponent<CharacterController>();
+            controller.height = 2f;
+            controller.center = new Vector3(0, 1f, 0);
+            controller.radius = 0.5f;
+        }
+
+        if (animator == null)
+            animator = GetComponent<Animator>();
+
+        // 🌐 Inicializar posición de red para evitar posiciones raras
+        networkPosition = transform.position;
+        networkRotation = transform.rotation;
+
+        // 🌐 VISIBILITY CULLING - Configuración inicial
+        if (!photonView.IsMine)
+        {
+            // ⚠️ CRÍTICO: Jugadores remotos empiezan OCULTOS
+            // Photon instancia TODOS los jugadores en todos los clientes
+            // Interest Management solo filtra UPDATES, NO instanciación
+            // Por eso debemos ocultar hasta recibir primer update
+            isModelVisible = false;
+
+            // Marcar tiempo inicial
+            lastNetworkUpdateTime = Time.time;
+
+            // Cache renderers y OCULTAR inmediatamente
+            if (enableVisibilityCulling)
+            {
+                CacheRenderers();
+                SetRenderersEnabled(false);
+            }
+        }
+        else
+        {
+            // Jugador local siempre visible
+            isModelVisible = true;
+        }
+
         // 🌐 Solo configurar controles para el jugador local
         if (!photonView.IsMine)
         {
@@ -479,17 +578,13 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             return; // No ejecutar el resto del Start para jugadores remotos
         }
 
-        controller = GetComponent<CharacterController>();
-        if (controller == null)
+        // 🌐 INTEREST MANAGEMENT - Configurar grupos inmediatamente al spawmear
+        if (photonView.IsMine && enableInterestManagement)
         {
-            controller = gameObject.AddComponent<CharacterController>();
-            controller.height = 2f;
-            controller.center = new Vector3(0, 1f, 0);
-            controller.radius = 0.5f;
+            currentGridCell = GetGridCell(transform.position);
+            lastGridCell = currentGridCell;
+            UpdateInterestGroup();
         }
-
-        if (animator == null)
-            animator = GetComponent<Animator>();
 
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
@@ -720,7 +815,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     void Update()
     {
-        // 🌐 Jugadores remotos: solo interpolar posición y rotación
+        // 🌐 Jugadores remotos: interpolar posición y rotación
         if (!photonView.IsMine)
         {
             // Interpolar posición con predicción de movimiento
@@ -741,6 +836,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
             // Interpolar rotación
             transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
+
+            // ⚠️ HACK: Forzar actualización de controller.isGrounded
+            // Aplicar un movimiento minúsculo hacia abajo para que Unity actualice las colisiones
+            controller.Move(Vector3.down * 0.001f);
 
             return; // No ejecutar lógica de control para jugadores remotos
         }
@@ -800,6 +899,12 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
         // Actualizar animaciones
         UpdateAnimations();
+
+        // 🌐 Actualizar Interest Management (reducir tráfico de red)
+        UpdateInterestManagement();
+
+        // 🌐 Actualizar Visibility Culling (ocultar modelos fuera de rango)
+        UpdateVisibilityCulling();
 
         // Actualizar sistema de ataque
         UpdateAttackSystem();
@@ -1127,12 +1232,6 @@ void ApplyMovement()
         }
     }
 
-    // 🔍 DEBUG: Detectar cambios de isGrounded
-    if (controller.isGrounded != lastGroundedState)
-    {
-        lastGroundedState = controller.isGrounded;
-        Debug.Log($"🟢 CAMBIO IsGrounded - IsMine:{photonView.IsMine} Nuevo:{controller.isGrounded} VelY:{velocity.y:F2} Pos.y:{transform.position.y:F2}");
-    }
 }
 
 
@@ -1379,6 +1478,11 @@ void UpdateAnimations()
     /// </summary>
     void UpdateIdleVariations()
     {
+        // 🌐 CRÍTICO: Solo el jugador LOCAL debe generar idle variations
+        // Los jugadores remotos recibirán la sincronización vía RPC
+        if (!photonView.IsMine)
+            return;
+
         if (!enableIdleVariations || animator == null || numberOfIdleVariations <= 0)
         {
             // Si está desactivado, asegurar que esté en idle normal (0)
@@ -1448,9 +1552,6 @@ void UpdateAnimations()
             // Verificar si es tiempo de terminar la variation
             if (idleVariationTimer >= currentAnimationDuration)
             {
-                // 🔍 DEBUG: Log al desactivar idle variation
-                Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (IdleVar:0)");
-
                 currentIdleVariation = 0f;
                 currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
@@ -1483,25 +1584,9 @@ void UpdateAnimations()
 
                     // ✅ Seleccionar idle variation aleatoria (1 a numberOfIdleVariations)
                     int randomVariationNumber = Random.Range(1, numberOfIdleVariations + 1);
-                    currentIdleVariation = (float)randomVariationNumber;
-                    currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
-                    isPlayingIdleVariation = true;
-                    idleVariationTimer = 0f;
 
-                    // 🔍 DEBUG: Log al activar idle variation
-                    Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{randomVariationNumber} (IdleVar:{currentIdleVariation})");
-
-                    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
-                    // Esto previene que la animación empiece desde la mitad
-                    if (!string.IsNullOrEmpty(idleStateNameInAnimator))
-                    {
-                        // Play el estado actual con normalizedTime = 0 (frame 0)
-                        animator.Play(idleStateNameInAnimator, 0, 0f);
-                    }
-                    else
-                    {
-                        Debug.LogWarning("⚠️ idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Configura el nombre del estado en el Inspector.");
-                    }
+                    // 🌐 LLAMAR RPC para sincronizar en TODOS los clientes (incluyendo este)
+                    photonView.RPC("RPC_PlayIdleVariation", RpcTarget.All, randomVariationNumber, savedTurnBeforeVariation, savedLookBeforeVariation);
                 }
                 else
                 {
@@ -1790,20 +1875,43 @@ void RPC_DoJump()
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
 
-    // 🔍 DEBUG: Log al ejecutar salto
-    Debug.Log($"🔴 SALTO EJECUTADO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{velocity.y:F2}");
-
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
     {
+        // ⚠️ CRÍTICO: En jugadores remotos, forzar actualización de IsGrounded ANTES del trigger
+        if (!photonView.IsMine)
+        {
+            animator.SetBool("IsGrounded", controller.isGrounded);
+        }
+
         animator.ResetTrigger("Jump");
         animator.SetTrigger("Jump");
         animator.SetFloat("VerticalSpeed", velocity.y);
-        // NOTA: IsGrounded se actualiza automáticamente en UpdateAnimations() cada frame
     }
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
     PlayJumpSound();
+}
+
+// 🌐 RPC: Sincronizar idle variation en TODOS los clientes
+[PunRPC]
+void RPC_PlayIdleVariation(int variationNumber, float savedTurn, float savedLook)
+{
+    // Actualizar variables
+    currentIdleVariation = (float)variationNumber;
+    currentIdleVariationIndex = variationNumber - 1; // Convertir a índice 0-based
+    isPlayingIdleVariation = true;
+    idleVariationTimer = 0f;
+
+    // 💾 Guardar valores de Turn/Look
+    savedTurnBeforeVariation = savedTurn;
+    savedLookBeforeVariation = savedLook;
+
+    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
+    if (animator != null && !string.IsNullOrEmpty(idleStateNameInAnimator))
+    {
+        animator.Play(idleStateNameInAnimator, 0, 0f);
+    }
 }
 
 void UpdateTimers()
@@ -2717,6 +2825,12 @@ void UpdateTimers()
 
 			// IdleVariation
 			stream.SendNext(currentIdleVariation);
+
+			// 🌐 Guardar valores enviados para delta compression
+			networkPosition = transform.position;
+			networkRotation = transform.rotation;
+			lastNetworkSpeed = currentSpeed;
+			lastNetworkState = (int)currentState;
 		}
 		else
 		{
@@ -2764,6 +2878,10 @@ void UpdateTimers()
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
 
+				// Actualizar valor local de idle variation
+				currentIdleVariation = idleVariation;
+				isPlayingIdleVariation = idleVariation > 0.1f;
+
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
 				{
@@ -2790,11 +2908,507 @@ void UpdateTimers()
 
 				// 8. GUARDAR TIMESTAMP para predicción
 				lastReceiveTime = info.SentServerTime;
+
+				// 9. 🌐 VISIBILITY CULLING - Marcar que recibimos update y mostrar modelo
+				lastNetworkUpdateTime = Time.time;
+				hasReceivedFirstUpdate = true; // Marcar que ya recibimos al menos un update
+
+				if (enableVisibilityCulling && !isModelVisible)
+				{
+					ShowModel();
+				}
 			}
 			catch (System.Exception e)
 			{
 				Debug.LogError($"ERROR en OnPhotonSerializeView (recepción): {e.Message}");
 			}
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 🌐 INTEREST MANAGEMENT SYSTEM (Grid-Based)
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza el Interest Management cada frame
+	/// Calcula la celda actual y actualiza grupos de interés
+	/// </summary>
+	void UpdateInterestManagement()
+	{
+		if (!enableInterestManagement || !photonView.IsMine)
+			return;
+
+		// Calcular celda actual del grid
+		currentGridCell = GetGridCell(transform.position);
+
+		// Si cambió de celda, actualizar Interest Group
+		if (currentGridCell != lastGridCell)
+		{
+			UpdateInterestGroup();
+			lastGridCell = currentGridCell;
+		}
+
+		// Actualizar timer
+		timeSinceLastUpdate += Time.deltaTime;
+	}
+
+	/// <summary>
+	/// Calcula en qué celda del grid está una posición
+	/// </summary>
+	Vector2Int GetGridCell(Vector3 position)
+	{
+		int cellX = Mathf.FloorToInt(position.x / gridCellSize);
+		int cellZ = Mathf.FloorToInt(position.z / gridCellSize);
+		return new Vector2Int(cellX, cellZ);
+	}
+
+	/// <summary>
+	/// Calcula el Interest Group basado en la celda actual
+	/// Usa un hash para convertir coordenadas 2D en un ID único
+	/// </summary>
+	int CalculateInterestGroup(Vector2Int cell)
+	{
+		// Hash simple pero efectivo: combinar X e Y
+		// Photon soporta hasta 255 grupos, así que usar módulo para mantener en rango
+		int hash = (cell.x * 73856093) ^ (cell.y * 19349663);
+		return Mathf.Abs(hash) % 255 + 1; // Photon usa grupos 1-255 (0 está reservado)
+	}
+
+	/// <summary>
+	/// Actualiza los Interest Groups de Photon basado en la posición actual
+	/// Incluye celda actual + celdas adyacentes según adjacentRadius
+	/// </summary>
+	void UpdateInterestGroup()
+	{
+		// Remover de todos los grupos anteriores
+		if (currentInterestGroup != 0)
+		{
+			photonView.ObservedComponents.Clear();
+			PhotonNetwork.SetInterestGroups(new byte[] { }, null);
+		}
+
+		// Lista de grupos a los que pertenecer y escuchar
+		List<byte> groupsToJoin = new List<byte>();
+		List<byte> groupsToListen = new List<byte>();
+
+		// Agregar celda actual + celdas adyacentes
+		for (int x = -adjacentRadius; x <= adjacentRadius; x++)
+		{
+			for (int z = -adjacentRadius; z <= adjacentRadius; z++)
+			{
+				Vector2Int cell = currentGridCell + new Vector2Int(x, z);
+				int groupId = CalculateInterestGroup(cell);
+
+				// Unirse al grupo de la celda actual
+				if (x == 0 && z == 0)
+				{
+					groupsToJoin.Add((byte)groupId);
+					currentInterestGroup = groupId;
+				}
+
+				// Escuchar todas las celdas en el radio
+				groupsToListen.Add((byte)groupId);
+			}
+		}
+
+		// Actualizar Photon Interest Groups
+		photonView.Group = (byte)currentInterestGroup;
+		PhotonNetwork.SetInterestGroups(groupsToListen.ToArray(), groupsToJoin.ToArray());
+	}
+
+	/// <summary>
+	/// Verifica si debe enviar update basado en delta compression
+	/// </summary>
+	bool ShouldSendUpdate()
+	{
+		// Si Interest Management está desactivado, siempre enviar
+		if (!enableInterestManagement)
+			return true;
+
+		// Si pasó mucho tiempo, forzar update
+		if (timeSinceLastUpdate >= maxTimeWithoutUpdate)
+		{
+			timeSinceLastUpdate = 0f;
+			return true;
+		}
+
+		// Verificar cambios significativos
+		bool positionChanged = Vector3.Distance(transform.position, networkPosition) > positionThreshold;
+		bool rotationChanged = Quaternion.Angle(transform.rotation, networkRotation) > rotationThreshold;
+		bool speedChanged = Mathf.Abs(currentSpeed - lastNetworkSpeed) > 0.1f;
+		bool stateChanged = ((int)currentState) != lastNetworkState;
+
+		if (positionChanged || rotationChanged || speedChanged || stateChanged)
+		{
+			timeSinceLastUpdate = 0f;
+			return true;
+		}
+
+		return false;
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 🌐 VISIBILITY CULLING SYSTEM (Auto Hide/Show Models)
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza el sistema de Visibility Culling cada frame
+	/// Oculta modelos si no reciben updates por mucho tiempo
+	/// </summary>
+	void UpdateVisibilityCulling()
+	{
+		// Solo para jugadores remotos
+		if (!enableVisibilityCulling || photonView.IsMine)
+			return;
+
+		float timeSinceLastNetworkUpdate = Time.time - lastNetworkUpdateTime;
+
+		// Solo ocultar si YA recibió updates antes y ahora dejó de recibirlos
+		// NO ocultar si nunca ha recibido updates (puede estar esperando el primer update de IM)
+		if (isModelVisible && hasReceivedFirstUpdate && timeSinceLastNetworkUpdate > visibilityTimeout)
+		{
+			HideModel();
+		}
+
+		// Actualizar fade effect si está activo
+		if (isFading)
+		{
+			UpdateFadeEffect();
+		}
+	}
+
+	/// <summary>
+	/// Muestra el modelo del jugador (llamado al recibir primer update)
+	/// </summary>
+	void ShowModel()
+	{
+		if (isModelVisible)
+			return;
+
+		isModelVisible = true;
+
+		// Cache renderers si no lo hemos hecho
+		if (!renderersAreCached)
+		{
+			CacheRenderers();
+		}
+
+		if (useFadeEffect)
+		{
+			// Iniciar fade in
+			StartFadeIn();
+		}
+		else
+		{
+			// Mostrar inmediatamente
+			SetRenderersEnabled(true);
+			SetRenderersAlpha(1f);
+		}
+	}
+
+	/// <summary>
+	/// Oculta el modelo del jugador (llamado cuando no recibe updates)
+	/// </summary>
+	void HideModel()
+	{
+		if (!isModelVisible)
+			return;
+
+		isModelVisible = false;
+
+		if (useFadeEffect)
+		{
+			// Iniciar fade out
+			StartFadeOut();
+		}
+		else
+		{
+			// Ocultar inmediatamente
+			SetRenderersEnabled(false);
+		}
+	}
+
+	/// <summary>
+	/// Cachea todos los Renderers del modelo para optimización
+	/// </summary>
+	void CacheRenderers()
+	{
+		// Obtener todos los renderers (SkinnedMeshRenderer, MeshRenderer, etc.)
+		cachedRenderers = GetComponentsInChildren<Renderer>(true);
+		renderersAreCached = true;
+
+		// Si vamos a usar fade, crear copias de materiales
+		if (useFadeEffect)
+		{
+			originalMaterials = new Dictionary<Renderer, Material[]>();
+			fadeMaterials = new Dictionary<Renderer, Material[]>();
+
+			foreach (Renderer rend in cachedRenderers)
+			{
+				// Guardar materiales originales
+				originalMaterials[rend] = rend.materials;
+
+				// Crear copias para fade (evitar modificar materiales compartidos)
+				Material[] matCopies = new Material[rend.materials.Length];
+				for (int i = 0; i < rend.materials.Length; i++)
+				{
+					matCopies[i] = new Material(rend.materials[i]);
+				}
+				fadeMaterials[rend] = matCopies;
+				rend.materials = matCopies;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Activa/desactiva todos los renderers
+	/// </summary>
+	void SetRenderersEnabled(bool enabled)
+	{
+		if (cachedRenderers == null)
+			return;
+
+		foreach (Renderer rend in cachedRenderers)
+		{
+			if (rend != null)
+				rend.enabled = enabled;
+		}
+	}
+
+	/// <summary>
+	/// Establece el alpha de todos los materiales
+	/// </summary>
+	void SetRenderersAlpha(float alpha)
+	{
+		if (!useFadeEffect || fadeMaterials == null)
+			return;
+
+		foreach (var kvp in fadeMaterials)
+		{
+			Renderer rend = kvp.Key;
+			Material[] materials = kvp.Value;
+
+			if (rend == null)
+				continue;
+
+			foreach (Material mat in materials)
+			{
+				if (mat == null)
+					continue;
+
+				// Verificar si el material soporta transparencia
+				if (mat.HasProperty("_Color"))
+				{
+					Color color = mat.color;
+					color.a = alpha;
+					mat.color = color;
+
+					// Cambiar a modo transparente si es necesario
+					if (alpha < 1f)
+					{
+						mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+						mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+						mat.SetInt("_ZWrite", 0);
+						mat.DisableKeyword("_ALPHATEST_ON");
+						mat.EnableKeyword("_ALPHABLEND_ON");
+						mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+						mat.renderQueue = 3000;
+					}
+					else
+					{
+						mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+						mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+						mat.SetInt("_ZWrite", 1);
+						mat.DisableKeyword("_ALPHATEST_ON");
+						mat.DisableKeyword("_ALPHABLEND_ON");
+						mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+						mat.renderQueue = -1;
+					}
+				}
+			}
+		}
+	}
+
+	/// <summary>
+	/// Inicia el efecto de fade in
+	/// </summary>
+	void StartFadeIn()
+	{
+		isFading = true;
+		isFadingIn = true;
+		fadeProgress = 0f;
+
+		// Activar renderers pero con alpha 0
+		SetRenderersEnabled(true);
+		SetRenderersAlpha(0f);
+	}
+
+	/// <summary>
+	/// Inicia el efecto de fade out
+	/// </summary>
+	void StartFadeOut()
+	{
+		isFading = true;
+		isFadingIn = false;
+		fadeProgress = 0f;
+	}
+
+	/// <summary>
+	/// Actualiza el efecto de fade (llamado cada frame mientras está activo)
+	/// </summary>
+	void UpdateFadeEffect()
+	{
+		float duration = isFadingIn ? fadeInDuration : fadeOutDuration;
+		fadeProgress += Time.deltaTime / duration;
+
+		if (fadeProgress >= 1f)
+		{
+			// Fade completado
+			fadeProgress = 1f;
+			isFading = false;
+
+			if (isFadingIn)
+			{
+				// Fade in completado - dejar en alpha 1
+				SetRenderersAlpha(1f);
+			}
+			else
+			{
+				// Fade out completado - desactivar renderers
+				SetRenderersAlpha(0f);
+				SetRenderersEnabled(false);
+			}
+		}
+		else
+		{
+			// Actualizar alpha según progreso
+			float alpha = isFadingIn ? fadeProgress : (1f - fadeProgress);
+			SetRenderersAlpha(alpha);
+		}
+	}
+
+	/// <summary>
+	/// Limpia recursos del Visibility Culling al destruir
+	/// </summary>
+	void CleanupVisibilityCulling()
+	{
+		// Destruir materiales duplicados para evitar memory leaks
+		if (fadeMaterials != null)
+		{
+			foreach (var kvp in fadeMaterials)
+			{
+				Material[] materials = kvp.Value;
+				if (materials != null)
+				{
+					foreach (Material mat in materials)
+					{
+						if (mat != null)
+							Destroy(mat);
+					}
+				}
+			}
+			fadeMaterials.Clear();
+		}
+
+		if (originalMaterials != null)
+		{
+			originalMaterials.Clear();
+		}
+	}
+
+	void OnDestroy()
+	{
+		CleanupVisibilityCulling();
+	}
+
+	/// <summary>
+	/// Dibuja el grid en el Scene view para visualización
+	/// </summary>
+	void OnDrawGizmos()
+	{
+		if (!showGridGizmos || !enableInterestManagement)
+			return;
+
+		Gizmos.color = gridGizmoColor;
+
+		// Obtener celda actual
+		Vector2Int myCell = GetGridCell(transform.position);
+
+		// Dibujar grid alrededor del jugador
+		int drawRadius = adjacentRadius + 2; // Dibujar un poco más allá del radius
+		for (int x = -drawRadius; x <= drawRadius; x++)
+		{
+			for (int z = -drawRadius; z <= drawRadius; z++)
+			{
+				Vector2Int cell = myCell + new Vector2Int(x, z);
+				Vector3 cellCenter = new Vector3(
+					cell.x * gridCellSize + gridCellSize * 0.5f,
+					transform.position.y,
+					cell.y * gridCellSize + gridCellSize * 0.5f
+				);
+
+				// Color diferente para celda actual y celdas en rango
+				if (x == 0 && z == 0)
+				{
+					// Celda actual - Verde brillante
+					Gizmos.color = new Color(0f, 1f, 0f, 0.8f);
+					DrawWireCube(cellCenter, new Vector3(gridCellSize, 0.1f, gridCellSize));
+				}
+				else if (Mathf.Abs(x) <= adjacentRadius && Mathf.Abs(z) <= adjacentRadius)
+				{
+					// Celdas en rango - Amarillo
+					Gizmos.color = new Color(1f, 1f, 0f, 0.5f);
+					DrawWireCube(cellCenter, new Vector3(gridCellSize, 0.1f, gridCellSize));
+				}
+				else
+				{
+					// Celdas fuera de rango - Gris claro
+					Gizmos.color = new Color(0.5f, 0.5f, 0.5f, 0.2f);
+					DrawWireCube(cellCenter, new Vector3(gridCellSize, 0.1f, gridCellSize));
+				}
+			}
+		}
+
+		// Dibujar radio de visibilidad
+		Gizmos.color = new Color(0f, 1f, 1f, 0.3f);
+		float visibilityRadius = gridCellSize * (adjacentRadius + 0.5f);
+		DrawWireCircle(transform.position, visibilityRadius);
+	}
+
+	/// <summary>
+	/// Dibuja un cubo en modo wireframe
+	/// </summary>
+	void DrawWireCube(Vector3 center, Vector3 size)
+	{
+		Vector3 halfSize = size * 0.5f;
+		Vector3[] corners = new Vector3[8];
+
+		corners[0] = center + new Vector3(-halfSize.x, 0, -halfSize.z);
+		corners[1] = center + new Vector3(halfSize.x, 0, -halfSize.z);
+		corners[2] = center + new Vector3(halfSize.x, 0, halfSize.z);
+		corners[3] = center + new Vector3(-halfSize.x, 0, halfSize.z);
+
+		Gizmos.DrawLine(corners[0], corners[1]);
+		Gizmos.DrawLine(corners[1], corners[2]);
+		Gizmos.DrawLine(corners[2], corners[3]);
+		Gizmos.DrawLine(corners[3], corners[0]);
+	}
+
+	/// <summary>
+	/// Dibuja un círculo en modo wireframe
+	/// </summary>
+	void DrawWireCircle(Vector3 center, float radius)
+	{
+		int segments = 32;
+		float angleStep = 360f / segments;
+		Vector3 prevPoint = center + new Vector3(radius, 0, 0);
+
+		for (int i = 1; i <= segments; i++)
+		{
+			float angle = angleStep * i * Mathf.Deg2Rad;
+			Vector3 newPoint = center + new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+			Gizmos.DrawLine(prevPoint, newPoint);
+			prevPoint = newPoint;
 		}
 	}
 }
