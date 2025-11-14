@@ -80,6 +80,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     // Variables internas del Visibility Culling
     private bool isModelVisible = false;
     private float lastNetworkUpdateTime = 0f;
+    private bool hasReceivedFirstUpdate = false; // Track si ya recibió al menos 1 update de red
     private Renderer[] cachedRenderers;
     private bool renderersAreCached = false;
     private bool isFading = false;
@@ -516,19 +517,26 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         if (animator == null)
             animator = GetComponent<Animator>();
 
-        // 🌐 VISIBILITY CULLING - Inicializar jugadores remotos como ocultos
-        if (!photonView.IsMine && enableVisibilityCulling)
+        // 🌐 Inicializar posición de red para evitar posiciones raras
+        networkPosition = transform.position;
+        networkRotation = transform.rotation;
+
+        // 🌐 VISIBILITY CULLING - Configuración inicial
+        if (!photonView.IsMine)
         {
-            // Ocultar modelo hasta recibir primer update de red
-            isModelVisible = false;
+            // Jugadores remotos: empezar VISIBLES y dejar que el timeout los oculte si es necesario
+            isModelVisible = true;
 
-            // Cache renderers temprano
-            CacheRenderers();
+            // Marcar tiempo inicial para que no se oculten inmediatamente
+            lastNetworkUpdateTime = Time.time;
 
-            // Ocultar sin fade (instantáneo)
-            SetRenderersEnabled(false);
+            // Cache renderers para estar listos
+            if (enableVisibilityCulling)
+            {
+                CacheRenderers();
+            }
         }
-        else if (photonView.IsMine)
+        else
         {
             // Jugador local siempre visible
             isModelVisible = true;
@@ -564,6 +572,14 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                 staminaBar.transform.parent.gameObject.SetActive(false);
 
             return; // No ejecutar el resto del Start para jugadores remotos
+        }
+
+        // 🌐 INTEREST MANAGEMENT - Configurar grupos inmediatamente al spawmear
+        if (photonView.IsMine && enableInterestManagement)
+        {
+            currentGridCell = GetGridCell(transform.position);
+            lastGridCell = currentGridCell;
+            UpdateInterestGroup();
         }
 
         if (audioSource == null)
@@ -2891,6 +2907,7 @@ void UpdateTimers()
 
 				// 9. 🌐 VISIBILITY CULLING - Marcar que recibimos update y mostrar modelo
 				lastNetworkUpdateTime = Time.time;
+				hasReceivedFirstUpdate = true; // Marcar que ya recibimos al menos un update
 
 				if (enableVisibilityCulling && !isModelVisible)
 				{
@@ -3042,8 +3059,9 @@ void UpdateTimers()
 
 		float timeSinceLastNetworkUpdate = Time.time - lastNetworkUpdateTime;
 
-		// Si el modelo está visible pero no recibimos updates, ocultarlo
-		if (isModelVisible && timeSinceLastNetworkUpdate > visibilityTimeout)
+		// Solo ocultar si YA recibió updates antes y ahora dejó de recibirlos
+		// NO ocultar si nunca ha recibido updates (puede estar esperando el primer update de IM)
+		if (isModelVisible && hasReceivedFirstUpdate && timeSinceLastNetworkUpdate > visibilityTimeout)
 		{
 			HideModel();
 		}
