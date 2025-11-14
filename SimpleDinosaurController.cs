@@ -58,6 +58,36 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private float timeSinceLastUpdate = 0f;
     private int currentInterestGroup = 0;
 
+    [Header("🌐 Visibility Culling (Auto Hide/Show)")]
+    [Tooltip("Activar sistema de ocultación automática de modelos")]
+    public bool enableVisibilityCulling = true;
+
+    [Tooltip("Tiempo sin updates de red antes de ocultar el modelo (segundos)")]
+    [Range(0.5f, 5f)]
+    public float visibilityTimeout = 2f;
+
+    [Tooltip("Usar efecto de fade in/out suave")]
+    public bool useFadeEffect = true;
+
+    [Tooltip("Duración del fade in al aparecer (segundos)")]
+    [Range(0.1f, 1f)]
+    public float fadeInDuration = 0.3f;
+
+    [Tooltip("Duración del fade out al desaparecer (segundos)")]
+    [Range(0.1f, 1f)]
+    public float fadeOutDuration = 0.3f;
+
+    // Variables internas del Visibility Culling
+    private bool isModelVisible = false;
+    private float lastNetworkUpdateTime = 0f;
+    private Renderer[] cachedRenderers;
+    private bool renderersAreCached = false;
+    private bool isFading = false;
+    private float fadeProgress = 0f;
+    private bool isFadingIn = false;
+    private Dictionary<Renderer, Material[]> originalMaterials;
+    private Dictionary<Renderer, Material[]> fadeMaterials;
+
     // Variables de red para interpolación
     private Vector3 networkPosition;
     private Quaternion networkRotation;
@@ -486,6 +516,24 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         if (animator == null)
             animator = GetComponent<Animator>();
 
+        // 🌐 VISIBILITY CULLING - Inicializar jugadores remotos como ocultos
+        if (!photonView.IsMine && enableVisibilityCulling)
+        {
+            // Ocultar modelo hasta recibir primer update de red
+            isModelVisible = false;
+
+            // Cache renderers temprano
+            CacheRenderers();
+
+            // Ocultar sin fade (instantáneo)
+            SetRenderersEnabled(false);
+        }
+        else if (photonView.IsMine)
+        {
+            // Jugador local siempre visible
+            isModelVisible = true;
+        }
+
         // 🌐 Solo configurar controles para el jugador local
         if (!photonView.IsMine)
         {
@@ -834,6 +882,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
         // 🌐 Actualizar Interest Management (reducir tráfico de red)
         UpdateInterestManagement();
+
+        // 🌐 Actualizar Visibility Culling (ocultar modelos fuera de rango)
+        UpdateVisibilityCulling();
 
         // Actualizar sistema de ataque
         UpdateAttackSystem();
@@ -2837,6 +2888,14 @@ void UpdateTimers()
 
 				// 8. GUARDAR TIMESTAMP para predicción
 				lastReceiveTime = info.SentServerTime;
+
+				// 9. 🌐 VISIBILITY CULLING - Marcar que recibimos update y mostrar modelo
+				lastNetworkUpdateTime = Time.time;
+
+				if (enableVisibilityCulling && !isModelVisible)
+				{
+					ShowModel();
+				}
 			}
 			catch (System.Exception e)
 			{
@@ -2965,6 +3024,279 @@ void UpdateTimers()
 		}
 
 		return false;
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 🌐 VISIBILITY CULLING SYSTEM (Auto Hide/Show Models)
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Actualiza el sistema de Visibility Culling cada frame
+	/// Oculta modelos si no reciben updates por mucho tiempo
+	/// </summary>
+	void UpdateVisibilityCulling()
+	{
+		// Solo para jugadores remotos
+		if (!enableVisibilityCulling || photonView.IsMine)
+			return;
+
+		float timeSinceLastNetworkUpdate = Time.time - lastNetworkUpdateTime;
+
+		// Si el modelo está visible pero no recibimos updates, ocultarlo
+		if (isModelVisible && timeSinceLastNetworkUpdate > visibilityTimeout)
+		{
+			HideModel();
+		}
+
+		// Actualizar fade effect si está activo
+		if (isFading)
+		{
+			UpdateFadeEffect();
+		}
+	}
+
+	/// <summary>
+	/// Muestra el modelo del jugador (llamado al recibir primer update)
+	/// </summary>
+	void ShowModel()
+	{
+		if (isModelVisible)
+			return;
+
+		isModelVisible = true;
+
+		// Cache renderers si no lo hemos hecho
+		if (!renderersAreCached)
+		{
+			CacheRenderers();
+		}
+
+		if (useFadeEffect)
+		{
+			// Iniciar fade in
+			StartFadeIn();
+		}
+		else
+		{
+			// Mostrar inmediatamente
+			SetRenderersEnabled(true);
+			SetRenderersAlpha(1f);
+		}
+	}
+
+	/// <summary>
+	/// Oculta el modelo del jugador (llamado cuando no recibe updates)
+	/// </summary>
+	void HideModel()
+	{
+		if (!isModelVisible)
+			return;
+
+		isModelVisible = false;
+
+		if (useFadeEffect)
+		{
+			// Iniciar fade out
+			StartFadeOut();
+		}
+		else
+		{
+			// Ocultar inmediatamente
+			SetRenderersEnabled(false);
+		}
+	}
+
+	/// <summary>
+	/// Cachea todos los Renderers del modelo para optimización
+	/// </summary>
+	void CacheRenderers()
+	{
+		// Obtener todos los renderers (SkinnedMeshRenderer, MeshRenderer, etc.)
+		cachedRenderers = GetComponentsInChildren<Renderer>(true);
+		renderersAreCached = true;
+
+		// Si vamos a usar fade, crear copias de materiales
+		if (useFadeEffect)
+		{
+			originalMaterials = new Dictionary<Renderer, Material[]>();
+			fadeMaterials = new Dictionary<Renderer, Material[]>();
+
+			foreach (Renderer rend in cachedRenderers)
+			{
+				// Guardar materiales originales
+				originalMaterials[rend] = rend.materials;
+
+				// Crear copias para fade (evitar modificar materiales compartidos)
+				Material[] matCopies = new Material[rend.materials.Length];
+				for (int i = 0; i < rend.materials.Length; i++)
+				{
+					matCopies[i] = new Material(rend.materials[i]);
+				}
+				fadeMaterials[rend] = matCopies;
+				rend.materials = matCopies;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Activa/desactiva todos los renderers
+	/// </summary>
+	void SetRenderersEnabled(bool enabled)
+	{
+		if (cachedRenderers == null)
+			return;
+
+		foreach (Renderer rend in cachedRenderers)
+		{
+			if (rend != null)
+				rend.enabled = enabled;
+		}
+	}
+
+	/// <summary>
+	/// Establece el alpha de todos los materiales
+	/// </summary>
+	void SetRenderersAlpha(float alpha)
+	{
+		if (!useFadeEffect || fadeMaterials == null)
+			return;
+
+		foreach (var kvp in fadeMaterials)
+		{
+			Renderer rend = kvp.Key;
+			Material[] materials = kvp.Value;
+
+			if (rend == null)
+				continue;
+
+			foreach (Material mat in materials)
+			{
+				if (mat == null)
+					continue;
+
+				// Verificar si el material soporta transparencia
+				if (mat.HasProperty("_Color"))
+				{
+					Color color = mat.color;
+					color.a = alpha;
+					mat.color = color;
+
+					// Cambiar a modo transparente si es necesario
+					if (alpha < 1f)
+					{
+						mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+						mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+						mat.SetInt("_ZWrite", 0);
+						mat.DisableKeyword("_ALPHATEST_ON");
+						mat.EnableKeyword("_ALPHABLEND_ON");
+						mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+						mat.renderQueue = 3000;
+					}
+					else
+					{
+						mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+						mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+						mat.SetInt("_ZWrite", 1);
+						mat.DisableKeyword("_ALPHATEST_ON");
+						mat.DisableKeyword("_ALPHABLEND_ON");
+						mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+						mat.renderQueue = -1;
+					}
+				}
+			}
+		}
+	}
+
+	/// <summary>
+	/// Inicia el efecto de fade in
+	/// </summary>
+	void StartFadeIn()
+	{
+		isFading = true;
+		isFadingIn = true;
+		fadeProgress = 0f;
+
+		// Activar renderers pero con alpha 0
+		SetRenderersEnabled(true);
+		SetRenderersAlpha(0f);
+	}
+
+	/// <summary>
+	/// Inicia el efecto de fade out
+	/// </summary>
+	void StartFadeOut()
+	{
+		isFading = true;
+		isFadingIn = false;
+		fadeProgress = 0f;
+	}
+
+	/// <summary>
+	/// Actualiza el efecto de fade (llamado cada frame mientras está activo)
+	/// </summary>
+	void UpdateFadeEffect()
+	{
+		float duration = isFadingIn ? fadeInDuration : fadeOutDuration;
+		fadeProgress += Time.deltaTime / duration;
+
+		if (fadeProgress >= 1f)
+		{
+			// Fade completado
+			fadeProgress = 1f;
+			isFading = false;
+
+			if (isFadingIn)
+			{
+				// Fade in completado - dejar en alpha 1
+				SetRenderersAlpha(1f);
+			}
+			else
+			{
+				// Fade out completado - desactivar renderers
+				SetRenderersAlpha(0f);
+				SetRenderersEnabled(false);
+			}
+		}
+		else
+		{
+			// Actualizar alpha según progreso
+			float alpha = isFadingIn ? fadeProgress : (1f - fadeProgress);
+			SetRenderersAlpha(alpha);
+		}
+	}
+
+	/// <summary>
+	/// Limpia recursos del Visibility Culling al destruir
+	/// </summary>
+	void CleanupVisibilityCulling()
+	{
+		// Destruir materiales duplicados para evitar memory leaks
+		if (fadeMaterials != null)
+		{
+			foreach (var kvp in fadeMaterials)
+			{
+				Material[] materials = kvp.Value;
+				if (materials != null)
+				{
+					foreach (Material mat in materials)
+					{
+						if (mat != null)
+							Destroy(mat);
+					}
+				}
+			}
+			fadeMaterials.Clear();
+		}
+
+		if (originalMaterials != null)
+		{
+			originalMaterials.Clear();
+		}
+	}
+
+	void OnDestroy()
+	{
+		CleanupVisibilityCulling();
 	}
 
 	/// <summary>
