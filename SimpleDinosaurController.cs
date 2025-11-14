@@ -772,10 +772,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             controller.Move(Vector3.down * 0.001f);
 
 			// 🌐 OPTIMIZACIÓN: Sistema de ocultamiento inteligente para objetos sin actualización
-			float timeSinceLastUpdate = Time.time - lastNetworkUpdate;
+			float timeSinceNetworkUpdate = Time.time - lastNetworkUpdate;
 
 			// Si no hay updates por mucho tiempo, podría ser un "fantasma"
-			if (timeSinceLastUpdate > maxTimeWithoutUpdate)
+			if (timeSinceNetworkUpdate > maxTimeWithoutUpdate)
 			{
 				// Ocultar el objeto si está muy lejos y sin updates
 				if (cameraTransform != null)
@@ -789,7 +789,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 						{
 							rend.enabled = false;
 						}
-						Debug.LogWarning($"[Interest] {gameObject.name} ocultado - sin updates por {timeSinceLastUpdate:F1}s");
+						Debug.LogWarning($"[Interest] {gameObject.name} ocultado - sin updates por {timeSinceNetworkUpdate:F1}s");
 					}
 				}
 			}
