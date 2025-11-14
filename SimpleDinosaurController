@@ -49,9 +49,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     // Timestamp para predicción
     private double lastReceiveTime;
 
-    // 🔍 DEBUG: Para detectar cambios de isGrounded
-    private bool lastGroundedState = true;
-
     [Header("Referencias")]
     public Animator animator;
     public AudioSource audioSource;
@@ -447,6 +444,20 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // 🌐 Obtener PhotonView
         photonView = GetComponent<PhotonView>();
 
+        // ⚠️ CRÍTICO: Asignar componentes esenciales ANTES de cualquier return
+        // Estos componentes son necesarios tanto para jugadores locales como remotos
+        controller = GetComponent<CharacterController>();
+        if (controller == null)
+        {
+            controller = gameObject.AddComponent<CharacterController>();
+            controller.height = 2f;
+            controller.center = new Vector3(0, 1f, 0);
+            controller.radius = 0.5f;
+        }
+
+        if (animator == null)
+            animator = GetComponent<Animator>();
+
         // 🌐 Solo configurar controles para el jugador local
         if (!photonView.IsMine)
         {
@@ -478,18 +489,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
             return; // No ejecutar el resto del Start para jugadores remotos
         }
-
-        controller = GetComponent<CharacterController>();
-        if (controller == null)
-        {
-            controller = gameObject.AddComponent<CharacterController>();
-            controller.height = 2f;
-            controller.center = new Vector3(0, 1f, 0);
-            controller.radius = 0.5f;
-        }
-
-        if (animator == null)
-            animator = GetComponent<Animator>();
 
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
@@ -720,7 +719,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     void Update()
     {
-        // 🌐 Jugadores remotos: solo interpolar posición y rotación
+        // 🌐 Jugadores remotos: interpolar posición y rotación
         if (!photonView.IsMine)
         {
             // Interpolar posición con predicción de movimiento
@@ -741,6 +740,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
             // Interpolar rotación
             transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, Time.deltaTime * networkRotationLerp);
+
+            // ⚠️ HACK: Forzar actualización de controller.isGrounded
+            // Aplicar un movimiento minúsculo hacia abajo para que Unity actualice las colisiones
+            controller.Move(Vector3.down * 0.001f);
 
             return; // No ejecutar lógica de control para jugadores remotos
         }
@@ -1127,12 +1130,6 @@ void ApplyMovement()
         }
     }
 
-    // 🔍 DEBUG: Detectar cambios de isGrounded
-    if (controller.isGrounded != lastGroundedState)
-    {
-        lastGroundedState = controller.isGrounded;
-        Debug.Log($"🟢 CAMBIO IsGrounded - IsMine:{photonView.IsMine} Nuevo:{controller.isGrounded} VelY:{velocity.y:F2} Pos.y:{transform.position.y:F2}");
-    }
 }
 
 
@@ -1379,6 +1376,11 @@ void UpdateAnimations()
     /// </summary>
     void UpdateIdleVariations()
     {
+        // 🌐 CRÍTICO: Solo el jugador LOCAL debe generar idle variations
+        // Los jugadores remotos recibirán la sincronización vía RPC
+        if (!photonView.IsMine)
+            return;
+
         if (!enableIdleVariations || animator == null || numberOfIdleVariations <= 0)
         {
             // Si está desactivado, asegurar que esté en idle normal (0)
@@ -1448,9 +1450,6 @@ void UpdateAnimations()
             // Verificar si es tiempo de terminar la variation
             if (idleVariationTimer >= currentAnimationDuration)
             {
-                // 🔍 DEBUG: Log al desactivar idle variation
-                Debug.Log($"🎭 IDLE VARIATION TERMINADA - IsMine:{photonView.IsMine} Regresando a idle normal (IdleVar:0)");
-
                 currentIdleVariation = 0f;
                 currentIdleVariationIndex = -1;
                 isPlayingIdleVariation = false;
@@ -1483,25 +1482,9 @@ void UpdateAnimations()
 
                     // ✅ Seleccionar idle variation aleatoria (1 a numberOfIdleVariations)
                     int randomVariationNumber = Random.Range(1, numberOfIdleVariations + 1);
-                    currentIdleVariation = (float)randomVariationNumber;
-                    currentIdleVariationIndex = randomVariationNumber - 1; // Convertir a índice 0-based para el array
-                    isPlayingIdleVariation = true;
-                    idleVariationTimer = 0f;
 
-                    // 🔍 DEBUG: Log al activar idle variation
-                    Debug.Log($"🎭 IDLE VARIATION ACTIVADA - IsMine:{photonView.IsMine} Variation#{randomVariationNumber} (IdleVar:{currentIdleVariation})");
-
-                    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
-                    // Esto previene que la animación empiece desde la mitad
-                    if (!string.IsNullOrEmpty(idleStateNameInAnimator))
-                    {
-                        // Play el estado actual con normalizedTime = 0 (frame 0)
-                        animator.Play(idleStateNameInAnimator, 0, 0f);
-                    }
-                    else
-                    {
-                        Debug.LogWarning("⚠️ idleStateNameInAnimator está vacío. La animación puede empezar desde la mitad. Configura el nombre del estado en el Inspector.");
-                    }
+                    // 🌐 LLAMAR RPC para sincronizar en TODOS los clientes (incluyendo este)
+                    photonView.RPC("RPC_PlayIdleVariation", RpcTarget.All, randomVariationNumber, savedTurnBeforeVariation, savedLookBeforeVariation);
                 }
                 else
                 {
@@ -1790,20 +1773,43 @@ void RPC_DoJump()
     hasJumped = true;
     jumpCooldownTimer = jumpCooldown;
 
-    // 🔍 DEBUG: Log al ejecutar salto
-    Debug.Log($"🔴 SALTO EJECUTADO - IsMine:{photonView.IsMine} IsGrounded:{controller.isGrounded} VelY:{velocity.y:F2}");
-
     // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes
     if (animator != null)
     {
+        // ⚠️ CRÍTICO: En jugadores remotos, forzar actualización de IsGrounded ANTES del trigger
+        if (!photonView.IsMine)
+        {
+            animator.SetBool("IsGrounded", controller.isGrounded);
+        }
+
         animator.ResetTrigger("Jump");
         animator.SetTrigger("Jump");
         animator.SetFloat("VerticalSpeed", velocity.y);
-        // NOTA: IsGrounded se actualiza automáticamente en UpdateAnimations() cada frame
     }
 
     // 🌐 SONIDO - Se ejecuta en todos los clientes
     PlayJumpSound();
+}
+
+// 🌐 RPC: Sincronizar idle variation en TODOS los clientes
+[PunRPC]
+void RPC_PlayIdleVariation(int variationNumber, float savedTurn, float savedLook)
+{
+    // Actualizar variables
+    currentIdleVariation = (float)variationNumber;
+    currentIdleVariationIndex = variationNumber - 1; // Convertir a índice 0-based
+    isPlayingIdleVariation = true;
+    idleVariationTimer = 0f;
+
+    // 💾 Guardar valores de Turn/Look
+    savedTurnBeforeVariation = savedTurn;
+    savedLookBeforeVariation = savedLook;
+
+    // 🎬 CRUCIAL: Forzar al Animator a reiniciar el estado desde frame 0
+    if (animator != null && !string.IsNullOrEmpty(idleStateNameInAnimator))
+    {
+        animator.Play(idleStateNameInAnimator, 0, 0f);
+    }
 }
 
 void UpdateTimers()
@@ -2763,6 +2769,10 @@ void UpdateTimers()
 				float turn = (float)stream.ReceiveNext();
 				float look = (float)stream.ReceiveNext();
 				float idleVariation = (float)stream.ReceiveNext();
+
+				// Actualizar valor local de idle variation
+				currentIdleVariation = idleVariation;
+				isPlayingIdleVariation = idleVariation > 0.1f;
 
 				// 7. ACTUALIZAR ANIMATOR (CRÍTICO para ver animaciones)
 				if (animator != null)
