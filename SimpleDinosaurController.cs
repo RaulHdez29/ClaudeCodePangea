@@ -771,29 +771,28 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             // Aplicar un movimiento minúsculo hacia abajo para que Unity actualice las colisiones
             controller.Move(Vector3.down * 0.001f);
 
-			// 🌐 OPTIMIZACIÓN: Sistema de ocultamiento inteligente para objetos sin actualización
+			// 🌐 OPTIMIZACIÓN: Sistema de detección de "fantasmas" (objetos duplicados/inválidos)
+			// NOTA: Solo oculta objetos que están FUERA del grupo de interés Y sin updates
 			float timeSinceNetworkUpdate = Time.time - lastNetworkUpdate;
 
-			// Si no hay updates por mucho tiempo, podría ser un "fantasma"
-			if (timeSinceNetworkUpdate > maxTimeWithoutUpdate)
+			// Verificar si la posición ha cambiado significativamente sin updates
+			// Esto indica un "fantasma" (objeto que debería estar en otra celda pero quedó aquí)
+			float distanceFromLastKnown = Vector3.Distance(transform.position, lastKnownPosition);
+			bool hasMovedWithoutUpdate = distanceFromLastKnown > gridCellSize * 0.5f && timeSinceNetworkUpdate > maxTimeWithoutUpdate;
+
+			// Solo ocultar si es un verdadero fantasma (movió mucho sin updates)
+			// NO ocultar objetos quietos que simplemente no envían updates
+			if (hasMovedWithoutUpdate)
 			{
-				// Ocultar el objeto si está muy lejos y sin updates
-				if (cameraTransform != null)
+				// Desactivar el renderer para ahorrar rendimiento
+				Renderer[] renderers = GetComponentsInChildren<Renderer>();
+				foreach (Renderer rend in renderers)
 				{
-					float distanceToCamera = Vector3.Distance(transform.position, cameraTransform.position);
-					if (distanceToCamera > 300f) // Solo ocultar si está lejos
-					{
-						// Desactivar el renderer para ahorrar rendimiento
-						Renderer[] renderers = GetComponentsInChildren<Renderer>();
-						foreach (Renderer rend in renderers)
-						{
-							rend.enabled = false;
-						}
-						Debug.LogWarning($"[Interest] {gameObject.name} ocultado - sin updates por {timeSinceNetworkUpdate:F1}s");
-					}
+					rend.enabled = false;
 				}
+				Debug.LogWarning($"[Interest] {gameObject.name} ocultado - fantasma detectado (movió {distanceFromLastKnown:F1}m sin updates)");
 			}
-			else
+			else if (timeSinceNetworkUpdate < maxTimeWithoutUpdate * 0.5f)
 			{
 				// Asegurar que el renderer esté activo si hay updates recientes
 				Renderer[] renderers = GetComponentsInChildren<Renderer>();
