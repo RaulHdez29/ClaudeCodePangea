@@ -2911,10 +2911,18 @@ void UpdateTimers()
 
 				// 9. 🌐 VISIBILITY CULLING - Marcar que recibimos update y mostrar modelo
 				lastNetworkUpdateTime = Time.time;
+
+				// 🐛 DEBUG: Log cuando recibe update de red
+				if (!hasReceivedFirstUpdate)
+				{
+					Debug.Log($"[Visibility] 📡 Player {photonView.ViewID} recibió PRIMER update de red");
+				}
+
 				hasReceivedFirstUpdate = true; // Marcar que ya recibimos al menos un update
 
 				if (enableVisibilityCulling && !isModelVisible)
 				{
+					Debug.Log($"[Visibility] 📡 Player {photonView.ViewID} recibió update - llamando ShowModel()");
 					ShowModel();
 				}
 			}
@@ -3011,6 +3019,10 @@ void UpdateTimers()
 			}
 		}
 
+		// 🐛 DEBUG: Log cuando cambia de celda/grupo
+		Debug.Log($"[InterestMgmt] 🗺️ Player Local cambió a celda {currentGridCell}, Grupo={currentInterestGroup}, " +
+			$"Escuchando {groupsToListen.Count} grupos (Radius={adjacentRadius})");
+
 		// Actualizar Photon Interest Groups
 		photonView.Group = (byte)currentInterestGroup;
 		PhotonNetwork.SetInterestGroups(groupsToListen.ToArray(), groupsToJoin.ToArray());
@@ -3063,10 +3075,21 @@ void UpdateTimers()
 
 		float timeSinceLastNetworkUpdate = Time.time - lastNetworkUpdateTime;
 
+		// 🐛 DEBUG: Log cada 2 segundos para ver el estado
+		if (Time.frameCount % 120 == 0) // Cada ~2 segundos a 60 FPS
+		{
+			Debug.Log($"[Visibility] Player {photonView.ViewID}: " +
+				$"Visible={isModelVisible}, " +
+				$"ReceivedUpdate={hasReceivedFirstUpdate}, " +
+				$"TimeSince={timeSinceLastNetworkUpdate:F1}s, " +
+				$"Timeout={visibilityTimeout}s");
+		}
+
 		// Solo ocultar si YA recibió updates antes y ahora dejó de recibirlos
 		// NO ocultar si nunca ha recibido updates (puede estar esperando el primer update de IM)
 		if (isModelVisible && hasReceivedFirstUpdate && timeSinceLastNetworkUpdate > visibilityTimeout)
 		{
+			Debug.LogWarning($"[Visibility] 👻 Ocultando Player {photonView.ViewID} - Sin updates por {timeSinceLastNetworkUpdate:F1}s");
 			HideModel();
 		}
 
@@ -3085,6 +3108,7 @@ void UpdateTimers()
 		if (isModelVisible)
 			return;
 
+		Debug.Log($"[Visibility] ✅ Mostrando Player {photonView.ViewID} (Fade={useFadeEffect})");
 		isModelVisible = true;
 
 		// Cache renderers si no lo hemos hecho
@@ -3114,6 +3138,7 @@ void UpdateTimers()
 		if (!isModelVisible)
 			return;
 
+		Debug.LogWarning($"[Visibility] ❌ Ocultando Player {photonView.ViewID} (Fade={useFadeEffect})");
 		isModelVisible = false;
 
 		if (useFadeEffect)
