@@ -615,6 +615,13 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         ResetIdleVariationTimer();
 
         SetupButtonListeners();
+
+        // 🌐 HEARTBEAT: Iniciar sistema de "señal de vida" para evitar ocultamientos
+        // Solo el jugador local envía heartbeats cada 2.5 segundos
+        if (photonView.IsMine)
+        {
+            InvokeRepeating("SendHeartbeat", 2.5f, 2.5f);
+        }
     }
     
     void SetupButtonListeners()
@@ -844,6 +851,20 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             // 🌐 CRÍTICO: Actualizar Visibility Culling para jugadores remotos
             // DEBE ejecutarse ANTES del return para que funcione el sistema de ocultación
             UpdateVisibilityCulling();
+
+            // 🛡️ SAFETY NET: Forzar visibilidad de renderers si el modelo debe estar visible
+            // Esto previene bugs donde los renderers se desactivan accidentalmente
+            if (isModelVisible && cachedRenderers != null)
+            {
+                foreach (Renderer rend in cachedRenderers)
+                {
+                    if (rend != null && !rend.enabled)
+                    {
+                        rend.enabled = true;
+                        Debug.LogWarning($"[Safety] 🛡️ Re-activando renderer de Player {photonView.ViewID}");
+                    }
+                }
+            }
 
             return; // No ejecutar lógica de control para jugadores remotos
         }
@@ -2939,6 +2960,38 @@ void UpdateTimers()
 	}
 
 	// ═══════════════════════════════════════════════════════════
+	// 🌐 HEARTBEAT SYSTEM (Keep-Alive Signal)
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Envía señal de "estoy vivo" cada 2.5 segundos para evitar que dinosaurios se oculten
+	/// Solo consume ~18 bytes por envío (inspirado en Creature.cs)
+	/// CRÍTICO: Previene que jugadores cercanos se oculten aunque Interest Management no envíe updates
+	/// </summary>
+	void SendHeartbeat()
+	{
+		// Solo enviar si somos el dueño (no enviar si estamos muertos podría ser opcional)
+		if (photonView != null && photonView.IsMine)
+		{
+			photonView.RPC("ReceiveHeartbeat", RpcTarget.Others);
+			Debug.Log($"[Heartbeat] 💓 Enviando señal de vida desde Player {photonView.ViewID}");
+		}
+	}
+
+	/// <summary>
+	/// RPC que actualiza el timestamp de última actualización
+	/// Previene que dinosaurios cercanos se oculten por falta de sincronización
+	/// Consumo: ~18 bytes por llamada
+	/// </summary>
+	[PunRPC]
+	void ReceiveHeartbeat()
+	{
+		// Simplemente actualizar el timestamp de última actualización de red
+		lastNetworkUpdateTime = Time.time;
+		Debug.Log($"[Heartbeat] 💓 Recibido heartbeat de Player {photonView.ViewID}");
+	}
+
+	// ═══════════════════════════════════════════════════════════
 	// 🌐 INTEREST MANAGEMENT SYSTEM (Grid-Based)
 	// ═══════════════════════════════════════════════════════════
 
@@ -3090,9 +3143,37 @@ void UpdateTimers()
 				$"Timeout={visibilityTimeout}s");
 		}
 
-		// Solo ocultar si YA recibió updates antes y ahora dejó de recibirlos
-		// NO ocultar si nunca ha recibido updates (puede estar esperando el primer update de IM)
-		if (isModelVisible && hasReceivedFirstUpdate && timeSinceLastNetworkUpdate > visibilityTimeout)
+		// ═══════════════════════════════════════════════════════════
+		// ✅ LÓGICA INTELIGENTE (inspirado en Creature.cs)
+		// ═══════════════════════════════════════════════════════════
+
+		// EXCEPCIONES: Estados que NO deben ocultarse
+		bool isStationary = currentSpeed <= 0.1f; // Parado
+		bool isSleeping = currentState == MovementState.Idle; // En idle (podría estar durmiendo)
+		bool isNearby = false;
+
+		// Verificar distancia a la cámara principal
+		if (Camera.main != null)
+		{
+			float distanceToCamera = Vector3.Distance(transform.position, Camera.main.transform.position);
+			isNearby = distanceToCamera < 300f; // Cerca (<300m)
+		}
+
+		// 🎯 LÓGICA INTELIGENTE:
+		// - Si está CERCA (<300m) Y en estado protegido → NUNCA ocultar
+		// - Si está LEJOS (>300m) sin updates → Ocultar después de visibilityTimeout
+		// - Si está muerto → NUNCA ocultar (para que se vea el cadáver)
+		bool shouldBeVisible = timeSinceLastNetworkUpdate < visibilityTimeout ||
+		                      isDead ||
+		                      (isNearby && (isStationary || isSleeping));
+
+		// Aplicar visibilidad
+		if (shouldBeVisible && !isModelVisible && hasReceivedFirstUpdate)
+		{
+			Debug.Log($"[Visibility] ✅ Mostrando Player {photonView.ViewID} (Cerca={isNearby}, Parado={isStationary})");
+			ShowModel();
+		}
+		else if (!shouldBeVisible && isModelVisible && hasReceivedFirstUpdate)
 		{
 			Debug.LogWarning($"[Visibility] 👻 Ocultando Player {photonView.ViewID} - Sin updates por {timeSinceLastNetworkUpdate:F1}s");
 			HideModel();
