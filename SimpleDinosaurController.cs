@@ -524,16 +524,20 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // 🌐 VISIBILITY CULLING - Configuración inicial
         if (!photonView.IsMine)
         {
-            // Jugadores remotos: empezar VISIBLES y dejar que el timeout los oculte si es necesario
-            isModelVisible = true;
+            // ⚠️ CRÍTICO: Jugadores remotos empiezan OCULTOS
+            // Photon instancia TODOS los jugadores en todos los clientes
+            // Interest Management solo filtra UPDATES, NO instanciación
+            // Por eso debemos ocultar hasta recibir primer update
+            isModelVisible = false;
 
-            // Marcar tiempo inicial para que no se oculten inmediatamente
+            // Marcar tiempo inicial
             lastNetworkUpdateTime = Time.time;
 
-            // Cache renderers para estar listos
+            // Cache renderers y OCULTAR inmediatamente
             if (enableVisibilityCulling)
             {
                 CacheRenderers();
+                SetRenderersEnabled(false);
             }
         }
         else
