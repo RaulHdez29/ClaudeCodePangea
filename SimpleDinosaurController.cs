@@ -841,6 +841,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             // Aplicar un movimiento minúsculo hacia abajo para que Unity actualice las colisiones
             controller.Move(Vector3.down * 0.001f);
 
+            // 🌐 CRÍTICO: Actualizar Visibility Culling para jugadores remotos
+            // DEBE ejecutarse ANTES del return para que funcione el sistema de ocultación
+            UpdateVisibilityCulling();
+
             return; // No ejecutar lógica de control para jugadores remotos
         }
 
@@ -903,7 +907,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // 🌐 Actualizar Interest Management (reducir tráfico de red)
         UpdateInterestManagement();
 
-        // 🌐 Actualizar Visibility Culling (ocultar modelos fuera de rango)
+        // 🌐 Visibility Culling ya se ejecutó arriba para jugadores remotos
+        // Para jugador local también necesitamos ejecutarlo (aunque siempre será visible)
         UpdateVisibilityCulling();
 
         // Actualizar sistema de ataque
