@@ -877,9 +877,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // Leer input del joystick
         GetInput();
 
-		// 🌊 Resetear detección de agua cada frame (OnTriggerStay lo volverá a activar si sigue en agua)
-		isTouchingWater = false;
-
 		// 🍖 Actualizar hambre, sed y estamina
 		UpdateHungerThirstStamina();
 
