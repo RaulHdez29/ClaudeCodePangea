@@ -1000,6 +1000,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                 }
             }
 
+            // ⭐ NUEVO: Escalar velocidad según la magnitud del joystick
+            // Si el joystick está a 50%, el dinosaurio se mueve al 50% de la velocidad máxima
+            targetSpeed *= inputVector.magnitude;
+
             // Reducir velocidad durante el giro (no aplica en agua)
             if (!isInWater)
             {
@@ -1282,6 +1286,23 @@ void UpdateAnimations()
         normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
     }
     animator.SetFloat("Speed", normalizedSpeed);
+
+    // ⭐ NUEVO: Ajustar velocidad de animación según magnitud del joystick
+    // Si el joystick está a 50%, la animación se reproduce al 50% de velocidad
+    // Esto hace que caminar lento se vea más natural
+    if (inputVector.magnitude > 0.01f && !isPlayingIdleVariation)
+    {
+        // Calcular velocidad de animación: rango entre 0.3 y 1.0
+        // Mínimo de 0.3 para que no se vea demasiado lento, máximo 1.0 para velocidad normal
+        float minAnimSpeed = 0.3f;
+        float animSpeed = Mathf.Lerp(minAnimSpeed, 1f, inputVector.magnitude);
+        animator.speed = animSpeed;
+    }
+    else
+    {
+        // Sin movimiento o en idle variation, velocidad normal
+        animator.speed = 1f;
+    }
 
     // 🔹 2. Estados principales
     animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
