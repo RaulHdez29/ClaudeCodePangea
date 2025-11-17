@@ -2294,7 +2294,7 @@ void UpdateTimers()
         }
 
         // 💤 CURACIÓN AL DORMIR
-        if (sleepSystemCache != null && sleepSystemCache.IsSleeping())
+        if (sleepSystemCache != null && sleepSystemCache.IsSleeping)
         {
             bleedingHealTimer += Time.deltaTime;
             if (bleedingHealTimer >= bleedingHealInterval)
