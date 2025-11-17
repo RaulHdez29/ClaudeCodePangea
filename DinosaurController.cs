@@ -494,6 +494,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private Collider waterCollider = null;
     private float waterSurfaceY = 0f;
     private bool wasInWater = false;
+    private bool isTouchingWater = false; // ⭐ Detecta si está tocando agua (incluso poco profunda)
 
 
     void Start()
@@ -875,6 +876,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
         // Leer input del joystick
         GetInput();
+
+		// 🌊 Resetear detección de agua cada frame (OnTriggerStay lo volverá a activar si sigue en agua)
+		isTouchingWater = false;
 
 		// 🍖 Actualizar hambre, sed y estamina
 		UpdateHungerThirstStamina();
@@ -2155,8 +2159,9 @@ void UpdateTimers()
     {
         if (audioSource != null)
         {
-            // 🌊 Prioridad: Si está en agua pero NO nadando, reproducir sonido de agua
-            if (isInWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
+            // 🌊 Prioridad: Si está tocando agua pero NO nadando, reproducir sonido de agua
+            // Usa isTouchingWater en lugar de isInWater para detectar agua poco profunda
+            if (isTouchingWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
             {
                 AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
                 audioSource.PlayOneShot(clip, 0.6f);
@@ -2178,8 +2183,9 @@ void UpdateTimers()
     {
         if (audioSource != null)
         {
-            // 🌊 Prioridad: Si está en agua pero NO nadando, reproducir sonido de agua
-            if (isInWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
+            // 🌊 Prioridad: Si está tocando agua pero NO nadando, reproducir sonido de agua
+            // Usa isTouchingWater en lugar de isInWater para detectar agua poco profunda
+            if (isTouchingWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
             {
                 AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
                 audioSource.PlayOneShot(clip, 0.5f); // Más bajo en crouch
@@ -2524,6 +2530,9 @@ void UpdateTimers()
         // Verificar si el collider está en el layer de agua
         if (((1 << other.gameObject.layer) & waterLayer) != 0)
         {
+            // ⭐ Marcar que está tocando agua (para sonidos de pisadas)
+            isTouchingWater = true;
+
             // Actualizar altura de superficie del agua
             UpdateWaterSurface(other);
 
@@ -2572,6 +2581,7 @@ void UpdateTimers()
     {
         isInWater = false;
         isSwimming = false;
+        isTouchingWater = false; // ⭐ Ya no está tocando agua
         waterCollider = null;
 
         Debug.Log("🏖️ Dinosaurio salió del agua!");
