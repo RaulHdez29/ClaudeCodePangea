@@ -240,12 +240,18 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public float staminaSleepRegenRate = 15f;
 
 	[Header("🍗 Sistema de Comer/Beber")]
+	[Tooltip("¿Es carnívoro? (si no, es herbívoro)")]
+	public bool isCarnivore = true;
 	[Tooltip("Distancia para detectar comida/agua")]
 	public float foodDetectionRange = 3f;
 	[Tooltip("Velocidad de aumento de hambre al comer")]
 	public float eatingSpeed = 15f;
 	[Tooltip("Velocidad de aumento de sed al beber")]
 	public float drinkingSpeed = 20f;
+	[Tooltip("Sonidos de comer (se reproducen por eventos de animación)")]
+	public AudioClip[] eatingSounds;
+	[Tooltip("Sonidos de beber (se reproducen por eventos de animación)")]
+	public AudioClip[] drinkingSounds;
 	[Tooltip("Duración de animación de comer")]
 	public float eatingAnimationDuration = 2f;
 
@@ -271,6 +277,39 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
 	// Referencia cacheada al sistema de sueño
 	private DinosaurSleepSystem sleepSystemCache;
+
+	[Header("🌊 Sonidos de Agua")]
+	[Tooltip("Sonidos de pisadas en agua (se reproducen por eventos de animación)")]
+	public AudioClip[] waterStepSounds;
+
+	[Header("🩸 Sistema de Sangrado")]
+	[Tooltip("Porcentaje de probabilidad de causar sangrado al atacar (0-100)")]
+	[Range(0f, 100f)]
+	public float bleedingChance = 30f;
+	[Tooltip("Daño por segundo que causa cada punto de sangrado")]
+	public float bleedingDamagePerStack = 0.5f;
+	[Tooltip("Intervalo de tiempo entre ticks de daño de sangrado (segundos)")]
+	public float bleedingDamageInterval = 1f;
+	[Tooltip("Puntos de sangrado que se curan cada tick al dormir")]
+	public float bleedingHealPerTick = 1f;
+	[Tooltip("Intervalo de tiempo entre ticks de curación al dormir (segundos)")]
+	public float bleedingHealInterval = 2f;
+
+	[Header("🩸 Visuales de Sangrado")]
+	[Tooltip("GameObject que se activa cuando hay sangrado (sangre en el modelo)")]
+	public GameObject bleedingVisualObject;
+	[Tooltip("Sistema de partículas de sangrado (visible por todos)")]
+	public ParticleSystem bleedingParticleSystem;
+	[Tooltip("TextMeshPro para mostrar cantidad de sangrado")]
+	public TMPro.TextMeshProUGUI bleedingText;
+	[Tooltip("Sonidos cuando se aplica sangrado")]
+	public AudioClip[] bleedingSounds;
+
+	// Variables privadas de sangrado
+	private int bleedingStacks = 0;
+	private float bleedingDamageTimer = 0f;
+	private float bleedingHealTimer = 0f;
+	private bool wasEnteredWaterRecently = false;
 
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
@@ -543,6 +582,14 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
         // 🎭 Inicializar sistema de idle variations
         ResetIdleVariationTimer();
+
+		// 🩸 Inicializar visuales de sangrado (desactivados al inicio)
+		if (bleedingVisualObject != null)
+			bleedingVisualObject.SetActive(false);
+		if (bleedingParticleSystem != null)
+			bleedingParticleSystem.Stop();
+		if (bleedingText != null)
+			bleedingText.gameObject.SetActive(false);
 
         SetupButtonListeners();
     }
@@ -829,6 +876,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
 		// 🍖 Actualizar hambre, sed y estamina
 		UpdateHungerThirstStamina();
+
+		// 🩸 Actualizar sistema de sangrado
+		UpdateBleedingSystem();
 
 		// 🍗 Detectar comida y agua cercana
 		DetectFoodAndWater();
@@ -1754,6 +1804,18 @@ void UpdateAnimations()
                 {
                     // Atacar a otro jugador a través de RPC
                     targetPhotonView.RPC("RPC_TakeDamage", RpcTarget.All, attackDamage, photonView.ViewID);
+
+                    // 🩸 Probabilidad de causar sangrado
+                    float randomChance = Random.Range(0f, 100f);
+                    if (randomChance <= bleedingChance)
+                    {
+                        // Aplicar 1 stack de sangrado
+                        SimpleDinosaurController targetController = hit.GetComponent<SimpleDinosaurController>();
+                        if (targetController != null)
+                        {
+                            targetController.ApplyBleeding(1);
+                        }
+                    }
                 }
                 else
                 {
@@ -2130,7 +2192,230 @@ void UpdateTimers()
             audioSource.PlayOneShot(clip);
         }
     }
-    
+
+    // ═══════════════════════════════════════════════════════════
+    // 🌊 MÉTODOS DE SONIDOS DE AGUA (llamados por Animation Events)
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Reproduce sonido de pisadas en agua (llamado por Animation Event)
+    /// Solo se reproduce si está en agua pero NO nadando
+    /// </summary>
+    public void PlayWaterStepSound()
+    {
+        if (audioSource != null && waterStepSounds != null && waterStepSounds.Length > 0)
+        {
+            // Solo reproducir si está en agua pero no nadando
+            if (isInWater && !isSwimming)
+            {
+                AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
+                audioSource.PlayOneShot(clip, 0.6f);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🍗 MÉTODOS DE SONIDOS DE COMER/BEBER (llamados por Animation Events)
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Reproduce sonido de comer (llamado por Animation Event)
+    /// </summary>
+    public void PlayEatingSound()
+    {
+        if (audioSource != null && eatingSounds != null && eatingSounds.Length > 0)
+        {
+            AudioClip clip = eatingSounds[Random.Range(0, eatingSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    /// <summary>
+    /// Reproduce sonido de beber (llamado por Animation Event)
+    /// </summary>
+    public void PlayDrinkingSound()
+    {
+        if (audioSource != null && drinkingSounds != null && drinkingSounds.Length > 0)
+        {
+            AudioClip clip = drinkingSounds[Random.Range(0, drinkingSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🩸 MÉTODOS DE SONIDOS DE SANGRADO
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Reproduce sonido de sangrado (cuando se aplica una herida sangrante)
+    /// </summary>
+    void PlayBleedingSound()
+    {
+        if (audioSource != null && bleedingSounds != null && bleedingSounds.Length > 0)
+        {
+            AudioClip clip = bleedingSounds[Random.Range(0, bleedingSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🩸 SISTEMA DE SANGRADO COMPLETO
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Actualiza el sistema de sangrado (daño continuo y curación al dormir)
+    /// </summary>
+    void UpdateBleedingSystem()
+    {
+        if (!photonView.IsMine) return; // Solo el dueño procesa el sangrado
+
+        // Si no hay sangrado, no hacer nada
+        if (bleedingStacks <= 0)
+        {
+            bleedingStacks = 0;
+            UpdateBleedingVisuals();
+            return;
+        }
+
+        // 🩸 DAÑO POR SANGRADO
+        bleedingDamageTimer += Time.deltaTime;
+        if (bleedingDamageTimer >= bleedingDamageInterval)
+        {
+            bleedingDamageTimer = 0f;
+
+            // Aplicar daño por cada stack de sangrado
+            float totalBleedingDamage = bleedingStacks * bleedingDamagePerStack;
+
+            HealthSystem healthSystem = GetComponent<HealthSystem>();
+            if (healthSystem != null)
+            {
+                healthSystem.TakeDamage(totalBleedingDamage);
+            }
+        }
+
+        // 💤 CURACIÓN AL DORMIR
+        if (sleepSystemCache != null && sleepSystemCache.IsSleeping())
+        {
+            bleedingHealTimer += Time.deltaTime;
+            if (bleedingHealTimer >= bleedingHealInterval)
+            {
+                bleedingHealTimer = 0f;
+
+                // Curar puntos de sangrado
+                int healAmount = Mathf.RoundToInt(bleedingHealPerTick);
+                RemoveBleedingStacks(healAmount);
+            }
+        }
+
+        // Actualizar visuales
+        UpdateBleedingVisuals();
+    }
+
+    /// <summary>
+    /// Aplica sangrado a este dinosaurio (llamado cuando otro dinosaurio lo ataca)
+    /// </summary>
+    /// <param name="stacks">Cantidad de stacks de sangrado a aplicar</param>
+    public void ApplyBleeding(int stacks)
+    {
+        if (stacks <= 0) return;
+
+        // 🌐 Sincronizar sangrado con todos los clientes
+        photonView.RPC("RPC_ApplyBleeding", RpcTarget.All, stacks);
+    }
+
+    [PunRPC]
+    void RPC_ApplyBleeding(int stacks)
+    {
+        bleedingStacks += stacks;
+
+        // Reproducir sonido de sangrado
+        PlayBleedingSound();
+
+        // Actualizar visuales
+        UpdateBleedingVisuals();
+
+        Debug.Log($"🩸 Sangrado aplicado! Stacks totales: {bleedingStacks}");
+    }
+
+    /// <summary>
+    /// Remueve stacks de sangrado (usado al curar al dormir)
+    /// </summary>
+    /// <param name="stacks">Cantidad de stacks a remover</param>
+    void RemoveBleedingStacks(int stacks)
+    {
+        if (stacks <= 0) return;
+
+        int previousStacks = bleedingStacks;
+        bleedingStacks = Mathf.Max(0, bleedingStacks - stacks);
+
+        if (bleedingStacks != previousStacks)
+        {
+            // 🌐 Sincronizar curación con todos los clientes
+            photonView.RPC("RPC_SetBleedingStacks", RpcTarget.All, bleedingStacks);
+        }
+    }
+
+    [PunRPC]
+    void RPC_SetBleedingStacks(int newStacks)
+    {
+        bleedingStacks = newStacks;
+        UpdateBleedingVisuals();
+
+        if (bleedingStacks <= 0)
+        {
+            Debug.Log("💊 Sangrado completamente curado!");
+        }
+    }
+
+    /// <summary>
+    /// Actualiza los visuales de sangrado (GameObject, ParticleSystem, UI)
+    /// </summary>
+    void UpdateBleedingVisuals()
+    {
+        bool hasBleeding = bleedingStacks > 0;
+
+        // 🩸 Activar/desactivar GameObject de sangrado
+        if (bleedingVisualObject != null)
+        {
+            bleedingVisualObject.SetActive(hasBleeding);
+        }
+
+        // 🩸 Activar/desactivar ParticleSystem de sangrado
+        if (bleedingParticleSystem != null)
+        {
+            if (hasBleeding && !bleedingParticleSystem.isPlaying)
+            {
+                bleedingParticleSystem.Play();
+            }
+            else if (!hasBleeding && bleedingParticleSystem.isPlaying)
+            {
+                bleedingParticleSystem.Stop();
+            }
+        }
+
+        // 🩸 Actualizar UI de texto
+        if (bleedingText != null)
+        {
+            if (hasBleeding)
+            {
+                bleedingText.gameObject.SetActive(true);
+                bleedingText.text = bleedingStacks.ToString();
+            }
+            else
+            {
+                bleedingText.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Obtiene la cantidad actual de stacks de sangrado
+    /// </summary>
+    public int GetBleedingStacks()
+    {
+        return bleedingStacks;
+    }
+
     void OnDrawGizmosSelected()
     {
         if (!showAttackGizmos) return;
@@ -2339,9 +2624,12 @@ void UpdateTimers()
 		Collider[] foodColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
 		nearbyFood = null;
 
+		// 🥩 Diferenciar entre carnívoros y herbívoros
+		string foodTag = isCarnivore ? "Food" : "FoodPlant";
+
 		foreach (Collider col in foodColliders)
 		{
-			if (col.CompareTag("Food"))
+			if (col.CompareTag(foodTag))
 			{
 				nearbyFood = col.gameObject;
 				break;
