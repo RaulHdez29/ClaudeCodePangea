@@ -68,6 +68,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Header("Referencias")]
     public Animator animator;
     public AudioSource audioSource;
+    [Tooltip("AudioSource especial para sonidos de comer y beber (opcional)")]
+    public AudioSource eatDrinkAudioSource;
     public Transform cameraTransform;
     
     [Header("Controles Táctiles")]
@@ -279,7 +281,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	private DinosaurSleepSystem sleepSystemCache;
 
 	[Header("🌊 Sonidos de Agua")]
-	[Tooltip("Sonidos de pisadas en agua (se reproducen por eventos de animación)")]
+	[Tooltip("Sonidos de pisadas en agua (se reproducen automáticamente cuando está en agua sin nadar)")]
 	public AudioClip[] waterStepSounds;
 
 	[Header("🩸 Sistema de Sangrado")]
@@ -2153,6 +2155,15 @@ void UpdateTimers()
     {
         if (audioSource != null)
         {
+            // 🌊 Prioridad: Si está en agua pero NO nadando, reproducir sonido de agua
+            if (isInWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
+            {
+                AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
+                audioSource.PlayOneShot(clip, 0.6f);
+                return; // Salir para no reproducir el sonido normal
+            }
+
+            // Sonidos normales (tierra)
             AudioClip[] clips = isRunning ? runSounds : walkSounds;
             if (clips.Length > 0)
             {
@@ -2167,6 +2178,15 @@ void UpdateTimers()
     {
         if (audioSource != null)
         {
+            // 🌊 Prioridad: Si está en agua pero NO nadando, reproducir sonido de agua
+            if (isInWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
+            {
+                AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
+                audioSource.PlayOneShot(clip, 0.5f); // Más bajo en crouch
+                return; // Salir para no reproducir el sonido normal
+            }
+
+            // Sonidos normales de crouch
             if (crouchWalkSounds.Length > 0)
             {
                 AudioClip clip = crouchWalkSounds[Random.Range(0, crouchWalkSounds.Length)];
@@ -2194,27 +2214,6 @@ void UpdateTimers()
     }
 
     // ═══════════════════════════════════════════════════════════
-    // 🌊 MÉTODOS DE SONIDOS DE AGUA (llamados por Animation Events)
-    // ═══════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Reproduce sonido de pisadas en agua (llamado por Animation Event)
-    /// Solo se reproduce si está en agua pero NO nadando
-    /// </summary>
-    public void PlayWaterStepSound()
-    {
-        if (audioSource != null && waterStepSounds != null && waterStepSounds.Length > 0)
-        {
-            // Solo reproducir si está en agua pero no nadando
-            if (isInWater && !isSwimming)
-            {
-                AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
-                audioSource.PlayOneShot(clip, 0.6f);
-            }
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════
     // 🍗 MÉTODOS DE SONIDOS DE COMER/BEBER (llamados por Animation Events)
     // ═══════════════════════════════════════════════════════════
 
@@ -2223,10 +2222,16 @@ void UpdateTimers()
     /// </summary>
     public void PlayEatingSound()
     {
-        if (audioSource != null && eatingSounds != null && eatingSounds.Length > 0)
+        if (eatingSounds != null && eatingSounds.Length > 0)
         {
-            AudioClip clip = eatingSounds[Random.Range(0, eatingSounds.Length)];
-            audioSource.PlayOneShot(clip);
+            // Usar AudioSource especial si está asignado, sino usar el principal
+            AudioSource sourceToUse = eatDrinkAudioSource != null ? eatDrinkAudioSource : audioSource;
+
+            if (sourceToUse != null)
+            {
+                AudioClip clip = eatingSounds[Random.Range(0, eatingSounds.Length)];
+                sourceToUse.PlayOneShot(clip);
+            }
         }
     }
 
@@ -2235,10 +2240,16 @@ void UpdateTimers()
     /// </summary>
     public void PlayDrinkingSound()
     {
-        if (audioSource != null && drinkingSounds != null && drinkingSounds.Length > 0)
+        if (drinkingSounds != null && drinkingSounds.Length > 0)
         {
-            AudioClip clip = drinkingSounds[Random.Range(0, drinkingSounds.Length)];
-            audioSource.PlayOneShot(clip);
+            // Usar AudioSource especial si está asignado, sino usar el principal
+            AudioSource sourceToUse = eatDrinkAudioSource != null ? eatDrinkAudioSource : audioSource;
+
+            if (sourceToUse != null)
+            {
+                AudioClip clip = drinkingSounds[Random.Range(0, drinkingSounds.Length)];
+                sourceToUse.PlayOneShot(clip);
+            }
         }
     }
 
