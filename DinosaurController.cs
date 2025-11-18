@@ -3354,7 +3354,7 @@ void UpdateTimers()
 		Destroy(deadBodyClone.GetComponent<PhotonTransformView>());
 
 		// Eliminar otros componentes opcionales si existen
-		DinosaurHealthSystem healthSystem = deadBodyClone.GetComponent<DinosaurHealthSystem>();
+		HealthSystem healthSystem = deadBodyClone.GetComponent<HealthSystem>();
 		if (healthSystem != null) Destroy(healthSystem);
 
 		DinosaurSleepSystem sleepSystem = deadBodyClone.GetComponent<DinosaurSleepSystem>();
