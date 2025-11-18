@@ -318,10 +318,12 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public Transform bleedingSpawnPoint;
 	[Tooltip("GameObject que se activa cuando hay sangrado (sangre en el modelo)")]
 	public GameObject bleedingVisualObject;
-	[Tooltip("Particle System de IMPACTO (se reproduce cuando recibe golpe con sangrado)")]
+	[Tooltip("Prefab del Particle System de IMPACTO (se instancia cuando recibe golpe)")]
 	public ParticleSystem bleedingHitParticleSystem;
-	[Tooltip("Particle System CONTINUO (chorrea sangre mientras tiene sangrado activo)")]
+	[Tooltip("Prefab del Particle System CONTINUO (se instancia cada X segundos mientras sangra)")]
 	public ParticleSystem bleedingDripParticleSystem;
+	[Tooltip("Intervalo de spawn del particle continuo (segundos)")]
+	public float bleedingDripSpawnInterval = 3f;
 	[Tooltip("TextMeshPro para mostrar cantidad de sangrado")]
 	public TMPro.TextMeshProUGUI bleedingText;
 	[Tooltip("Sonidos cuando se aplica sangrado")]
@@ -331,6 +333,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	private int bleedingStacks = 0;
 	private float bleedingDamageTimer = 0f;
 	private float bleedingHealTimer = 0f;
+	private float bleedingDripSpawnTimer = 0f;
 	private bool wasEnteredWaterRecently = false;
 
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
@@ -613,12 +616,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         ResetIdleVariationTimer();
 
 		// 🩸 Inicializar visuales de sangrado (desactivados al inicio)
+		// Nota: bleedingHitParticleSystem y bleedingDripParticleSystem son prefabs que se instancian, no necesitan Stop()
 		if (bleedingVisualObject != null)
 			bleedingVisualObject.SetActive(false);
-		if (bleedingHitParticleSystem != null)
-			bleedingHitParticleSystem.Stop();
-		if (bleedingDripParticleSystem != null)
-			bleedingDripParticleSystem.Stop();
 		if (bleedingText != null)
 			bleedingText.gameObject.SetActive(false);
 
@@ -1322,7 +1322,7 @@ void ApplyMovement()
 
         isSliding = true;
         isCrouching = true;
-        isRunning = false; // Desactivar correr durante el slide
+        // NO desactivar isRunning - se mantiene activo para seguir corriendo después del slide
 
         // Guardar dirección actual del movimiento
         slideDirection = currentMoveDirection.magnitude > 0.1f ? currentMoveDirection.normalized : transform.forward;
@@ -2482,6 +2482,32 @@ void UpdateTimers()
             }
         }
 
+        // 💧 SPAWN PERIÓDICO DEL PARTICLE CONTINUO
+        bleedingDripSpawnTimer += Time.deltaTime;
+        if (bleedingDripSpawnTimer >= bleedingDripSpawnInterval)
+        {
+            bleedingDripSpawnTimer = 0f;
+
+            // Instanciar particle continuo
+            if (bleedingDripParticleSystem != null)
+            {
+                // Determinar posición de spawn
+                Vector3 spawnPosition = bleedingSpawnPoint != null ? bleedingSpawnPoint.position : transform.position + Vector3.up * 1f;
+                Quaternion spawnRotation = bleedingSpawnPoint != null ? bleedingSpawnPoint.rotation : Quaternion.identity;
+
+                // Instanciar el particle system
+                ParticleSystem dripInstance = Instantiate(bleedingDripParticleSystem, spawnPosition, spawnRotation);
+
+                // Reproducir el particle
+                dripInstance.Play();
+
+                // Destruir el GameObject después de que termine el particle
+                Destroy(dripInstance.gameObject, dripInstance.main.duration + dripInstance.main.startLifetime.constantMax);
+
+                Debug.Log("💧 Particle de sangrado continuo instanciado");
+            }
+        }
+
         // Actualizar visuales
         UpdateBleedingVisuals();
     }
@@ -2506,19 +2532,30 @@ void UpdateTimers()
         // Reproducir sonido de sangrado
         PlayBleedingSound();
 
-        // 🩸 Reproducir particle system de IMPACTO (efecto instantáneo cuando recibe golpe)
+        // 🩸 INSTANCIAR particle system de IMPACTO (efecto instantáneo cuando recibe golpe)
         if (bleedingHitParticleSystem != null)
         {
-            // Posicionar en el punto de spawn si existe
-            if (bleedingSpawnPoint != null)
-            {
-                bleedingHitParticleSystem.transform.position = bleedingSpawnPoint.position;
-            }
-            bleedingHitParticleSystem.Play();
+            // Determinar posición de spawn
+            Vector3 spawnPosition = bleedingSpawnPoint != null ? bleedingSpawnPoint.position : transform.position + Vector3.up * 1f;
+            Quaternion spawnRotation = bleedingSpawnPoint != null ? bleedingSpawnPoint.rotation : Quaternion.identity;
+
+            // Instanciar el particle system
+            ParticleSystem hitInstance = Instantiate(bleedingHitParticleSystem, spawnPosition, spawnRotation);
+
+            // Reproducir el particle
+            hitInstance.Play();
+
+            // Destruir el GameObject después de que termine el particle
+            Destroy(hitInstance.gameObject, hitInstance.main.duration + hitInstance.main.startLifetime.constantMax);
+
+            Debug.Log("💥 Particle de impacto instanciado");
         }
 
-        // Actualizar visuales (incluye el particle system continuo)
+        // Actualizar visuales (NO incluye particle continuo aquí, se maneja en UpdateBleedingSystem)
         UpdateBleedingVisuals();
+
+        // Resetear el timer del particle continuo para que spawne uno inmediatamente
+        bleedingDripSpawnTimer = bleedingDripSpawnInterval;
 
         Debug.Log($"🩸 Sangrado aplicado! Stacks totales: {bleedingStacks}");
     }
@@ -2554,7 +2591,8 @@ void UpdateTimers()
     }
 
     /// <summary>
-    /// Actualiza los visuales de sangrado (GameObject, ParticleSystem, UI)
+    /// Actualiza los visuales de sangrado (GameObject y UI)
+    /// Los particle systems se manejan mediante Instantiate en otros métodos
     /// </summary>
     void UpdateBleedingVisuals()
     {
@@ -2564,29 +2602,6 @@ void UpdateTimers()
         if (bleedingVisualObject != null)
         {
             bleedingVisualObject.SetActive(hasBleeding);
-        }
-
-        // 🩸 Activar/desactivar ParticleSystem CONTINUO (chorrea sangre)
-        if (bleedingDripParticleSystem != null)
-        {
-            // Posicionar en el punto de spawn si existe
-            if (bleedingSpawnPoint != null)
-            {
-                bleedingDripParticleSystem.transform.position = bleedingSpawnPoint.position;
-            }
-
-            if (hasBleeding && !bleedingDripParticleSystem.isPlaying)
-            {
-                // Iniciar el particle system continuo
-                bleedingDripParticleSystem.Play();
-                Debug.Log("💧 Particle system de sangrado continuo iniciado");
-            }
-            else if (!hasBleeding && bleedingDripParticleSystem.isPlaying)
-            {
-                // Detener el particle system continuo
-                bleedingDripParticleSystem.Stop();
-                Debug.Log("💊 Particle system de sangrado continuo detenido");
-            }
         }
 
         // 🩸 Actualizar UI de texto
