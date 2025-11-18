@@ -102,6 +102,22 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public float runSpeed = 5f;
     public float crouchSpeed = 1f;
     public float turnSpeed = 120f;
+
+    [Header("🏃‍♂️ SISTEMA DE DESLIZAMIENTO (Slide)")]
+    [Tooltip("Permite deslizarse al agacharse mientras corre")]
+    public bool enableSliding = true;
+    [Tooltip("Velocidad mínima para activar el deslizamiento")]
+    public float slideMinSpeed = 3f;
+    [Tooltip("Multiplicador de velocidad inicial del deslizamiento (1.0 = mantiene velocidad)")]
+    [Range(0.5f, 1.5f)]
+    public float slideSpeedMultiplier = 1.2f;
+    [Tooltip("Deceleración del deslizamiento (más alto = frena más rápido)")]
+    [Range(1f, 10f)]
+    public float slideDeceleration = 3f;
+    [Tooltip("Velocidad mínima para mantener el deslizamiento")]
+    public float slideStopSpeed = 0.5f;
+    [Tooltip("Duración máxima del deslizamiento (segundos)")]
+    public float slideMaxDuration = 2f;
     
     [Header("🔄 CONFIGURACIÓN DE RADIO DE GIRO - MEJORADO")]
     [Tooltip("Radio mínimo de giro al caminar")]
@@ -441,7 +457,13 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private Vector3 velocity;
     private float currentSpeed = 0f;
     private float targetSpeed = 0f;
-    
+
+    // 🏃‍♂️ Variables de deslizamiento
+    private bool isSliding = false;
+    private float slideSpeed = 0f;
+    private Vector3 slideDirection = Vector3.zero;
+    private float slideTimer = 0f;
+
     // ⭐ VARIABLES DE RADIO DE GIRO NATURAL
     private Vector3 currentMoveDirection;
     private Vector3 targetMoveDirection;
@@ -613,7 +635,16 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         {
             crouchButton.onClick.RemoveAllListeners();
             crouchButton.onClick.AddListener(() => {
-                isCrouching = !isCrouching;
+                // 🏃‍♂️ Si está corriendo rápido y se agacha, activar deslizamiento
+                if (!isCrouching && enableSliding && currentSpeed >= slideMinSpeed && controller.isGrounded)
+                {
+                    StartSlide();
+                }
+                else
+                {
+                    // Agacharse normalmente
+                    isCrouching = !isCrouching;
+                }
                 // Ya no desactivamos isRunning aquí
                 // El usuario puede tener run activo y crouch al mismo tiempo
             });
@@ -889,8 +920,14 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         // Detectar pendientes
         CheckSlope();
 
-        // Calcular movimiento y rotación
-        CalculateMovement();
+		// 🏃‍♂️ Actualizar sistema de deslizamiento
+		UpdateSliding();
+
+        // Calcular movimiento y rotación (se salta si está deslizándose)
+        if (!isSliding)
+        {
+            CalculateMovement();
+        }
 
         // ⭐ FIX: Aplicar rotación separada
         ApplySeparatedRotation();
@@ -1253,8 +1290,113 @@ void ApplyMovement()
 
 }
 
+    // ═══════════════════════════════════════════════════════════
+    // 🏃‍♂️ SISTEMA DE DESLIZAMIENTO (SLIDE)
+    // ═══════════════════════════════════════════════════════════
 
-    
+    /// <summary>
+    /// Inicia el deslizamiento cuando se agacha mientras corre
+    /// </summary>
+    void StartSlide()
+    {
+        if (isSliding) return; // Ya está deslizándose
+
+        isSliding = true;
+        isCrouching = true;
+        isRunning = false; // Desactivar correr durante el slide
+
+        // Guardar dirección actual del movimiento
+        slideDirection = currentMoveDirection.magnitude > 0.1f ? currentMoveDirection.normalized : transform.forward;
+
+        // Aplicar velocidad inicial del slide (con multiplicador)
+        slideSpeed = currentSpeed * slideSpeedMultiplier;
+
+        // Resetear timer
+        slideTimer = 0f;
+
+        Debug.Log($"🏃‍♂️ Slide iniciado! Velocidad: {slideSpeed:F2}");
+    }
+
+    /// <summary>
+    /// Actualiza la física del deslizamiento
+    /// </summary>
+    void UpdateSliding()
+    {
+        if (!isSliding) return;
+
+        slideTimer += Time.deltaTime;
+
+        // Reducir velocidad gradualmente
+        slideSpeed = Mathf.Lerp(slideSpeed, 0f, Time.deltaTime * slideDeceleration);
+
+        // Aplicar movimiento en la dirección del slide
+        moveDirection = slideDirection * slideSpeed;
+
+        // Actualizar currentSpeed para las animaciones
+        currentSpeed = slideSpeed;
+        targetSpeed = slideSpeed;
+
+        // Condiciones para detener el slide
+        bool shouldStopSlide = false;
+
+        // 1. Velocidad muy baja
+        if (slideSpeed < slideStopSpeed)
+        {
+            shouldStopSlide = true;
+            Debug.Log("🛑 Slide detenido: velocidad baja");
+        }
+
+        // 2. Duración máxima alcanzada
+        if (slideTimer >= slideMaxDuration)
+        {
+            shouldStopSlide = true;
+            Debug.Log("🛑 Slide detenido: duración máxima");
+        }
+
+        // 3. En el aire (perdió contacto con el suelo)
+        if (!controller.isGrounded)
+        {
+            shouldStopSlide = true;
+            Debug.Log("🛑 Slide detenido: en el aire");
+        }
+
+        // 4. Jugador intenta moverse en otra dirección (opcional)
+        if (inputVector.magnitude > 0.3f)
+        {
+            Vector3 inputDirection = (cameraTransform.forward * inputVector.z + cameraTransform.right * inputVector.x).normalized;
+            float angleDifference = Vector3.Angle(slideDirection, inputDirection);
+
+            // Si intenta moverse en dirección opuesta (más de 90 grados)
+            if (angleDifference > 90f)
+            {
+                shouldStopSlide = true;
+                Debug.Log("🛑 Slide detenido: cambio de dirección");
+            }
+        }
+
+        if (shouldStopSlide)
+        {
+            StopSlide();
+        }
+    }
+
+    /// <summary>
+    /// Detiene el deslizamiento
+    /// </summary>
+    void StopSlide()
+    {
+        if (!isSliding) return;
+
+        isSliding = false;
+        slideSpeed = 0f;
+        slideDirection = Vector3.zero;
+
+        // El jugador sigue agachado, pero puede levantarse presionando el botón de nuevo
+        Debug.Log("✅ Slide completado");
+    }
+
+
+
     void AlignToTerrainFixed()
     {
         // ⭐ FIX: Nueva implementación que no afecta la rotación Y
