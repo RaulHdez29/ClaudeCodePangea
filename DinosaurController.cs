@@ -641,14 +641,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         {
             crouchButton.onClick.RemoveAllListeners();
             crouchButton.onClick.AddListener(() => {
-                // 🏃‍♂️ Si está corriendo y se agacha, activar deslizamiento
-                if (!isCrouching && enableSliding && isRunning && currentSpeed >= slideMinSpeed && controller.isGrounded)
+                // Si ya está agachado, levantarse
+                if (isCrouching)
                 {
-                    StartSlide();
-                }
-                else if (isCrouching)
-                {
-                    // Si ya está agachado, levantarse
                     isCrouching = false;
 
                     // Si estaba deslizándose, detener el slide
@@ -657,13 +652,20 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                         StopSlide();
                     }
                 }
+                // Si no está agachado, agacharse o hacer slide según velocidad
                 else
                 {
-                    // Agacharse normalmente (sin slide)
-                    isCrouching = true;
+                    // 🏃‍♂️ Si está moviéndose rápido y puede hacer slide, activar deslizamiento
+                    if (enableSliding && currentSpeed >= slideMinSpeed && controller.isGrounded)
+                    {
+                        StartSlide();
+                    }
+                    else
+                    {
+                        // Agacharse normalmente (velocidad baja o sin condiciones para slide)
+                        isCrouching = true;
+                    }
                 }
-                // Ya no desactivamos isRunning aquí
-                // El usuario puede tener run activo y crouch al mismo tiempo
             });
         }
 
