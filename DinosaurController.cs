@@ -338,6 +338,16 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	private float bleedingDripSpawnTimer = 0f;
 	private bool wasEnteredWaterRecently = false;
 
+	[Header("💀 SISTEMA DE CUERPOS MUERTOS")]
+	[Tooltip("Activar sistema de cuerpos muertos al morir")]
+	public bool enableDeadBodySystem = true;
+	[Tooltip("Nombre del prefab del cuerpo muerto en Resources/ (debe tener script DeadBody y PhotonView)")]
+	public string deadBodyPrefabName = "DeadDinosaurBody";
+	[Tooltip("Delay antes de ocultar el renderer y spawmear el cuerpo (segundos)")]
+	public float deadBodySpawnDelay = 3f;
+	[Tooltip("Cantidad de carne inicial en el cuerpo muerto")]
+	public float deadBodyMeatAmount = 500f;
+
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
     public bool enableStaticTurn = true;
@@ -2952,11 +2962,58 @@ void UpdateTimers()
 	/// </summary>
 	System.Collections.IEnumerator EatingCoroutine()
 	{
+		// 🍖 Detectar si es un cuerpo muerto
+		DeadBody deadBody = nearbyFood != null ? nearbyFood.GetComponent<DeadBody>() : null;
+		bool isEatingDeadBody = deadBody != null;
+
+		// Timer para consumir carne de cuerpos muertos (cada mordida)
+		float meatConsumptionTimer = 0f;
+		float meatConsumptionInterval = 2f; // Consumir carne cada 2 segundos (una mordida)
+
 		while (isEating && currentHunger < maxHunger && nearbyFood != null)
 		{
-			// Aumentar hambre gradualmente
-			currentHunger += eatingSpeed * Time.deltaTime;
-			currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+			// 💀 COMER DE CUERPO MUERTO
+			if (isEatingDeadBody && deadBody != null)
+			{
+				meatConsumptionTimer += Time.deltaTime;
+
+				// Consumir carne cada X segundos (mordida)
+				if (meatConsumptionTimer >= meatConsumptionInterval)
+				{
+					meatConsumptionTimer = 0f;
+
+					// Calcular cuánta carne consumir esta mordida
+					float meatPerBite = 100f; // 100 de carne por mordida
+
+					// Consumir carne del cuerpo (solo master client puede modificar)
+					if (PhotonNetwork.IsMasterClient)
+					{
+						float consumed = deadBody.ConsumeMeat(meatPerBite);
+
+						if (consumed > 0f)
+						{
+							// Aumentar hambre basándose en la carne consumida
+							currentHunger += consumed;
+							currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+							Debug.Log($"🍖 Consumido {consumed} de carne. Hambre: {currentHunger}/{maxHunger}");
+						}
+						else
+						{
+							// No hay más carne en este cuerpo
+							Debug.Log("❌ No hay más carne en este cuerpo");
+							StopEating();
+							yield break;
+						}
+					}
+				}
+			}
+			// 🌿 COMER COMIDA NORMAL
+			else
+			{
+				// Aumentar hambre gradualmente
+				currentHunger += eatingSpeed * Time.deltaTime;
+				currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+			}
 
 			// Si se llenó, dejar de comer automáticamente
 			if (currentHunger >= maxHunger)
@@ -3209,9 +3266,6 @@ void UpdateTimers()
 
 		Debug.Log("💀 Dinosaurio ha muerto!");
 
-		// Detener todas las corrutinas activas
-		StopAllCoroutines();
-
 		// Detener estados
 		isEating = false;
 		isDrinking = false;
@@ -3241,8 +3295,62 @@ void UpdateTimers()
 			controller.enabled = false;
 		}
 
+		// 💀 NUEVO: Iniciar coroutine para spawmear cuerpo muerto (solo el master client)
+		if (enableDeadBodySystem && photonView.IsMine)
+		{
+			StartCoroutine(SpawnDeadBodyAfterDelay());
+		}
+
 		// Desactivar este script
 		this.enabled = false;
+	}
+
+	/// <summary>
+	/// Coroutine que espera el delay y luego spawmea el cuerpo muerto
+	/// </summary>
+	System.Collections.IEnumerator SpawnDeadBodyAfterDelay()
+	{
+		Debug.Log($"⏱️ Esperando {deadBodySpawnDelay} segundos antes de spawmear cuerpo...");
+
+		// Esperar a que termine la animación de muerte
+		yield return new WaitForSeconds(deadBodySpawnDelay);
+
+		Debug.Log("💀 Spawmeando cuerpo muerto...");
+
+		// Ocultar los renderers del jugador actual
+		Renderer[] renderers = GetComponentsInChildren<Renderer>();
+		foreach (Renderer rend in renderers)
+		{
+			rend.enabled = false;
+		}
+
+		// Crear el cuerpo muerto en la red (visible para todos, incluso nuevos jugadores)
+		// IMPORTANTE: El prefab debe estar en Resources/ y tener PhotonView + DeadBody script
+		GameObject deadBodyObj = PhotonNetwork.InstantiateRoomObject(
+			deadBodyPrefabName,
+			transform.position,
+			transform.rotation
+		);
+
+		if (deadBodyObj != null)
+		{
+			// Configurar el cuerpo muerto
+			DeadBody deadBody = deadBodyObj.GetComponent<DeadBody>();
+			if (deadBody != null)
+			{
+				deadBody.meatAmount = deadBodyMeatAmount;
+				deadBody.currentMeat = deadBodyMeatAmount;
+				Debug.Log($"✅ Cuerpo muerto spawmeado con {deadBodyMeatAmount} de carne");
+			}
+			else
+			{
+				Debug.LogError("❌ El prefab del cuerpo muerto no tiene el script DeadBody!");
+			}
+		}
+		else
+		{
+			Debug.LogError($"❌ No se pudo instanciar el cuerpo muerto. Verifica que el prefab '{deadBodyPrefabName}' existe en Resources/");
+		}
 	}
 
 	// 🌐 PHOTON: Sincronización OPTIMIZADA de datos personalizados
