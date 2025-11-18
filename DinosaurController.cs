@@ -213,8 +213,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public bool canMoveWhileAttacking = false;
     [Tooltip("Puede rotar mientras ataca")]
     public bool canRotateWhileAttacking = true;
-    [Tooltip("⏱️ Delay antes de aplicar el daño (para sincronizar con la animación de mordida)")]
-    public float attackDamageDelay = 0.5f;
+    [Tooltip("⏱️ Duración de la ventana de daño activa (tiempo en que puede hacer daño durante el ataque)")]
+    public float attackDamageWindow = 2f;
     
     [Header("🎵 AUDIO DE ATAQUE")]
     public AudioClip[] attackSounds;
@@ -1841,6 +1841,14 @@ void UpdateAnimations()
         if (isAttacking)
         {
             attackTimer -= Time.deltaTime;
+
+            // ⚔️ NUEVA VENTANA DE DAÑO: Verificar continuamente si hay enemigos en rango
+            // Esto permite que enemigos que entren durante la animación reciban daño
+            if (photonView.IsMine)
+            {
+                PerformAttackDamage();
+            }
+
             if (attackTimer <= 0f)
             {
                 EndAttack();
@@ -1923,14 +1931,13 @@ void UpdateAnimations()
     void RPC_ExecuteAttack()
     {
         isAttacking = true;
-        attackTimer = attackDuration;
+        // ⏱️ NUEVA VENTANA DE DAÑO: El attackTimer ahora usa attackDamageWindow
+        // Durante este tiempo, el dinosaurio puede hacer daño a enemigos que entren en su rango
+        attackTimer = attackDamageWindow;
         attackCooldownTimer = attackCooldown;
         currentState = MovementState.Attacking;
 
-        // 🛡️ Cancelar cualquier daño pendiente de ataques anteriores
-        CancelInvoke(nameof(PerformAttackDamage));
-
-        // Limpiar lista de enemigos golpeados
+        // Limpiar lista de enemigos golpeados (cada enemigo solo puede ser golpeado UNA vez por mordida)
         enemiesHit.Clear();
 
         // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes para que todos vean el ataque
@@ -1943,12 +1950,8 @@ void UpdateAnimations()
         // Sonido (se ejecuta en todos los clientes)
         PlayAttackSound();
 
-        // 🌐 Hacer daño SOLO en el cliente que atacó (el dueño) DESPUÉS del delay
-        if (photonView.IsMine)
-        {
-            // ⏱️ Aplicar el daño después del delay configurado (para sincronizar con animación)
-            Invoke(nameof(PerformAttackDamage), attackDamageDelay);
-        }
+        // 🌐 El daño se aplicará continuamente en Update() mientras attackTimer > 0 (solo en el dueño)
+        // Esto permite que enemigos que entren en el rango durante la animación reciban daño
     }
     
     void PerformAttackDamage()
