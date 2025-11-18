@@ -213,6 +213,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public bool canMoveWhileAttacking = false;
     [Tooltip("Puede rotar mientras ataca")]
     public bool canRotateWhileAttacking = true;
+    [Tooltip("⏱️ Delay antes de aplicar el daño (para sincronizar con la animación de mordida)")]
+    public float attackDamageDelay = 0.5f;
     
     [Header("🎵 AUDIO DE ATAQUE")]
     public AudioClip[] attackSounds;
@@ -1925,6 +1927,9 @@ void UpdateAnimations()
         attackCooldownTimer = attackCooldown;
         currentState = MovementState.Attacking;
 
+        // 🛡️ Cancelar cualquier daño pendiente de ataques anteriores
+        CancelInvoke(nameof(PerformAttackDamage));
+
         // Limpiar lista de enemigos golpeados
         enemiesHit.Clear();
 
@@ -1938,10 +1943,11 @@ void UpdateAnimations()
         // Sonido (se ejecuta en todos los clientes)
         PlayAttackSound();
 
-        // 🌐 Hacer daño SOLO en el cliente que atacó (el dueño)
+        // 🌐 Hacer daño SOLO en el cliente que atacó (el dueño) DESPUÉS del delay
         if (photonView.IsMine)
         {
-            PerformAttackDamage();
+            // ⏱️ Aplicar el daño después del delay configurado (para sincronizar con animación)
+            Invoke(nameof(PerformAttackDamage), attackDamageDelay);
         }
     }
     
