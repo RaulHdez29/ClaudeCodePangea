@@ -1,11 +1,10 @@
 using UnityEngine;
-using Photon.Pun;
 
 /// <summary>
 /// Maneja los cuerpos muertos de dinosaurios que pueden ser comidos
-/// Se sincroniza por red para que todos los jugadores vean el mismo estado
+/// Se sincroniza mediante el sistema de RPCs del DinosaurController
 /// </summary>
-public class DeadBody : MonoBehaviourPunCallbacks, IPunObservable
+public class DeadBody : MonoBehaviour
 {
     [Header("🍖 Configuración de Carne")]
     [Tooltip("Cantidad inicial de carne en el cuerpo")]
@@ -21,6 +20,10 @@ public class DeadBody : MonoBehaviourPunCallbacks, IPunObservable
     [Header("📊 Estado Actual")]
     [Tooltip("Carne restante en el cuerpo")]
     public float currentMeat;
+
+    [Header("🆔 Identificación")]
+    [Tooltip("ID único del cuerpo para sincronización en red")]
+    public string bodyID;
 
     private float despawnTimer = 0f;
     private AudioSource audioSource;
@@ -40,37 +43,27 @@ public class DeadBody : MonoBehaviourPunCallbacks, IPunObservable
             audioSource.maxDistance = 20f;
         }
 
-        Debug.Log($"🍖 Cuerpo muerto creado con {currentMeat} de carne. Se destruirá en {despawnTime} segundos.");
+        Debug.Log($"🍖 Cuerpo muerto creado con {currentMeat} de carne. ID: {bodyID}");
     }
 
     void Update()
     {
-        // Solo el master client maneja el timer de destrucción
-        if (PhotonNetwork.IsMasterClient)
-        {
-            despawnTimer += Time.deltaTime;
+        despawnTimer += Time.deltaTime;
 
-            // Verificar si se agotó el tiempo o la carne
-            if (despawnTimer >= despawnTime || currentMeat <= 0f)
-            {
-                Debug.Log($"🗑️ Destruyendo cuerpo muerto. Razón: {(currentMeat <= 0f ? "Carne agotada" : "Tiempo expirado")}");
-                PhotonNetwork.Destroy(gameObject);
-            }
+        // Verificar si se agotó el tiempo o la carne
+        if (despawnTimer >= despawnTime || currentMeat <= 0f)
+        {
+            Debug.Log($"🗑️ Destruyendo cuerpo muerto. Razón: {(currentMeat <= 0f ? "Carne agotada" : "Tiempo expirado")}");
+            Destroy(gameObject);
         }
     }
 
     /// <summary>
     /// Consume carne del cuerpo. Retorna la cantidad consumida.
+    /// Este método es llamado localmente, la sincronización se hace desde DinosaurController
     /// </summary>
     public float ConsumeMeat(float amount)
     {
-        // Solo el dueño (master client) puede modificar la carne
-        if (!PhotonNetwork.IsMasterClient)
-        {
-            Debug.LogWarning("⚠️ Solo el Master Client puede consumir carne del cuerpo");
-            return 0f;
-        }
-
         if (currentMeat <= 0f)
         {
             Debug.Log("❌ No hay más carne en este cuerpo");
@@ -83,20 +76,16 @@ public class DeadBody : MonoBehaviourPunCallbacks, IPunObservable
 
         Debug.Log($"🍖 Consumido {consumed} de carne. Restante: {currentMeat}");
 
-        // Reproducir sonido de comer (en todos los clientes)
-        photonView.RPC("RPC_PlayEatingSound", RpcTarget.All);
-
-        // Si se agotó la carne, marcar para destrucción en el próximo Update
-        if (currentMeat <= 0f)
-        {
-            Debug.Log("💀 Carne agotada, el cuerpo será destruido");
-        }
+        // Reproducir sonido de comer
+        PlayEatingSound();
 
         return consumed;
     }
 
-    [PunRPC]
-    void RPC_PlayEatingSound()
+    /// <summary>
+    /// Reproduce sonido de comer
+    /// </summary>
+    public void PlayEatingSound()
     {
         if (eatingSounds != null && eatingSounds.Length > 0 && audioSource != null)
         {
@@ -122,21 +111,10 @@ public class DeadBody : MonoBehaviourPunCallbacks, IPunObservable
     }
 
     /// <summary>
-    /// Sincronización de Photon - envía/recibe el estado de la carne
+    /// Actualiza la cantidad de carne (llamado desde RPC para sincronizar)
     /// </summary>
-    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    public void SetMeat(float amount)
     {
-        if (stream.IsWriting)
-        {
-            // Enviar datos (solo el master client escribe)
-            stream.SendNext(currentMeat);
-            stream.SendNext(despawnTimer);
-        }
-        else
-        {
-            // Recibir datos (otros clientes leen)
-            currentMeat = (float)stream.ReceiveNext();
-            despawnTimer = (float)stream.ReceiveNext();
-        }
+        currentMeat = amount;
     }
 }
