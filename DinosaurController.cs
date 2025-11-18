@@ -314,10 +314,14 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public float bleedingHealInterval = 2f;
 
 	[Header("🩸 Visuales de Sangrado")]
+	[Tooltip("Punto de spawn para efectos de sangrado (ej: cabeza, cuerpo)")]
+	public Transform bleedingSpawnPoint;
 	[Tooltip("GameObject que se activa cuando hay sangrado (sangre en el modelo)")]
 	public GameObject bleedingVisualObject;
-	[Tooltip("Sistema de partículas de sangrado (visible por todos)")]
-	public ParticleSystem bleedingParticleSystem;
+	[Tooltip("Particle System de IMPACTO (se reproduce cuando recibe golpe con sangrado)")]
+	public ParticleSystem bleedingHitParticleSystem;
+	[Tooltip("Particle System CONTINUO (chorrea sangre mientras tiene sangrado activo)")]
+	public ParticleSystem bleedingDripParticleSystem;
 	[Tooltip("TextMeshPro para mostrar cantidad de sangrado")]
 	public TMPro.TextMeshProUGUI bleedingText;
 	[Tooltip("Sonidos cuando se aplica sangrado")]
@@ -611,8 +615,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 		// 🩸 Inicializar visuales de sangrado (desactivados al inicio)
 		if (bleedingVisualObject != null)
 			bleedingVisualObject.SetActive(false);
-		if (bleedingParticleSystem != null)
-			bleedingParticleSystem.Stop();
+		if (bleedingHitParticleSystem != null)
+			bleedingHitParticleSystem.Stop();
+		if (bleedingDripParticleSystem != null)
+			bleedingDripParticleSystem.Stop();
 		if (bleedingText != null)
 			bleedingText.gameObject.SetActive(false);
 
@@ -635,15 +641,26 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         {
             crouchButton.onClick.RemoveAllListeners();
             crouchButton.onClick.AddListener(() => {
-                // 🏃‍♂️ Si está corriendo rápido y se agacha, activar deslizamiento
-                if (!isCrouching && enableSliding && currentSpeed >= slideMinSpeed && controller.isGrounded)
+                // 🏃‍♂️ Si está corriendo y se agacha, activar deslizamiento
+                if (!isCrouching && enableSliding && isRunning && currentSpeed >= slideMinSpeed && controller.isGrounded)
                 {
                     StartSlide();
                 }
+                else if (isCrouching)
+                {
+                    // Si ya está agachado, levantarse
+                    isCrouching = false;
+
+                    // Si estaba deslizándose, detener el slide
+                    if (isSliding)
+                    {
+                        StopSlide();
+                    }
+                }
                 else
                 {
-                    // Agacharse normalmente
-                    isCrouching = !isCrouching;
+                    // Agacharse normalmente (sin slide)
+                    isCrouching = true;
                 }
                 // Ya no desactivamos isRunning aquí
                 // El usuario puede tener run activo y crouch al mismo tiempo
@@ -2487,7 +2504,18 @@ void UpdateTimers()
         // Reproducir sonido de sangrado
         PlayBleedingSound();
 
-        // Actualizar visuales
+        // 🩸 Reproducir particle system de IMPACTO (efecto instantáneo cuando recibe golpe)
+        if (bleedingHitParticleSystem != null)
+        {
+            // Posicionar en el punto de spawn si existe
+            if (bleedingSpawnPoint != null)
+            {
+                bleedingHitParticleSystem.transform.position = bleedingSpawnPoint.position;
+            }
+            bleedingHitParticleSystem.Play();
+        }
+
+        // Actualizar visuales (incluye el particle system continuo)
         UpdateBleedingVisuals();
 
         Debug.Log($"🩸 Sangrado aplicado! Stacks totales: {bleedingStacks}");
@@ -2536,16 +2564,26 @@ void UpdateTimers()
             bleedingVisualObject.SetActive(hasBleeding);
         }
 
-        // 🩸 Activar/desactivar ParticleSystem de sangrado
-        if (bleedingParticleSystem != null)
+        // 🩸 Activar/desactivar ParticleSystem CONTINUO (chorrea sangre)
+        if (bleedingDripParticleSystem != null)
         {
-            if (hasBleeding && !bleedingParticleSystem.isPlaying)
+            // Posicionar en el punto de spawn si existe
+            if (bleedingSpawnPoint != null)
             {
-                bleedingParticleSystem.Play();
+                bleedingDripParticleSystem.transform.position = bleedingSpawnPoint.position;
             }
-            else if (!hasBleeding && bleedingParticleSystem.isPlaying)
+
+            if (hasBleeding && !bleedingDripParticleSystem.isPlaying)
             {
-                bleedingParticleSystem.Stop();
+                // Iniciar el particle system continuo
+                bleedingDripParticleSystem.Play();
+                Debug.Log("💧 Particle system de sangrado continuo iniciado");
+            }
+            else if (!hasBleeding && bleedingDripParticleSystem.isPlaying)
+            {
+                // Detener el particle system continuo
+                bleedingDripParticleSystem.Stop();
+                Debug.Log("💊 Particle system de sangrado continuo detenido");
             }
         }
 
