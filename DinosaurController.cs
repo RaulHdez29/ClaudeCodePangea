@@ -655,7 +655,13 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                 // Si no está agachado, agacharse o hacer slide según velocidad
                 else
                 {
-                    // 🏃‍♂️ Si está moviéndose rápido y puede hacer slide, activar deslizamiento
+                    // 🏃‍♂️ PRIMERO desactivar correr (si está activo) para permitir agacharse
+                    if (isRunning)
+                    {
+                        isRunning = false;
+                    }
+
+                    // Si está moviéndose rápido y puede hacer slide, activar deslizamiento
                     if (enableSliding && currentSpeed >= slideMinSpeed && controller.isGrounded)
                     {
                         StartSlide();
@@ -1322,7 +1328,7 @@ void ApplyMovement()
 
         isSliding = true;
         isCrouching = true;
-        // NO desactivar isRunning - se mantiene activo para seguir corriendo después del slide
+        // Nota: isRunning ya fue desactivado en el botón crouch antes de llamar a StartSlide()
 
         // Guardar dirección actual del movimiento
         slideDirection = currentMoveDirection.magnitude > 0.1f ? currentMoveDirection.normalized : transform.forward;
