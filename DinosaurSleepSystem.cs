@@ -331,6 +331,7 @@ public class DinosaurSleepSystem : MonoBehaviourPunCallbacks
 
     /// <summary>
     /// Regenera estamina y vida mientras el dinosaurio está durmiendo
+    /// También cura el sangrado progresivamente
     /// </summary>
     void RegenerateWhileSleeping()
     {
@@ -372,6 +373,13 @@ public class DinosaurSleepSystem : MonoBehaviourPunCallbacks
                 healthSystem.currentHealth += healthRegenRate * Time.deltaTime;
                 healthSystem.currentHealth = Mathf.Clamp(healthSystem.currentHealth, 0f, healthSystem.maxHealth);
             }
+        }
+
+        // 🩸 CURAR SANGRADO mientras duerme
+        // Llama al método público del controlador para curar sangrado
+        if (dinosaurController != null)
+        {
+            dinosaurController.HealBleedingWhileSleeping(Time.deltaTime);
         }
 
         // 📊 Actualizar las barras UI en tiempo real

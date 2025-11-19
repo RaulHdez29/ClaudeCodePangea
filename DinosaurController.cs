@@ -2651,6 +2651,40 @@ void UpdateTimers()
     }
 
     /// <summary>
+    /// 💤 Cura el sangrado progresivamente mientras el dinosaurio duerme
+    /// Llamado desde DinosaurSleepSystem durante el estado de sueño
+    /// </summary>
+    public void HealBleedingWhileSleeping(float deltaTime)
+    {
+        // Solo procesar si hay sangrado activo
+        if (bleedingStacks <= 0) return;
+
+        // Solo el dueño del objeto procesa la curación
+        if (!photonView.IsMine) return;
+
+        // Incrementar el timer de curación
+        bleedingHealTimer += deltaTime;
+
+        // Log de debug para verificar que funciona
+        if (Time.frameCount % 60 == 0) // Log cada 60 frames (~1 segundo)
+        {
+            Debug.Log($"💤 Durmiendo con sangrado ({bleedingStacks} stacks). Timer de curación: {bleedingHealTimer:F2}/{bleedingHealInterval:F2}s");
+        }
+
+        // Si alcanzó el intervalo de curación
+        if (bleedingHealTimer >= bleedingHealInterval)
+        {
+            bleedingHealTimer = 0f;
+
+            // Curar puntos de sangrado
+            int healAmount = Mathf.RoundToInt(bleedingHealPerTick);
+            RemoveBleedingStacks(healAmount);
+
+            Debug.Log($"✅ SANGRADO CURADO! Reducido en {healAmount} stacks. Stacks restantes: {bleedingStacks}");
+        }
+    }
+
+    /// <summary>
     /// Actualiza los visuales de sangrado (GameObject y UI)
     /// Los particle systems se manejan mediante Instantiate en otros métodos
     /// </summary>
@@ -3345,6 +3379,22 @@ void UpdateTimers()
 	// Ya no necesitamos RPC_SpawnDeadBody porque se llama directamente desde RPC_Die
 
 	/// <summary>
+	/// Asigna un tag recursivamente a un GameObject y todos sus hijos
+	/// </summary>
+	void SetTagRecursively(GameObject obj, string tag)
+	{
+		if (obj == null) return;
+
+		obj.tag = tag;
+
+		// Aplicar recursivamente a todos los hijos
+		foreach (Transform child in obj.transform)
+		{
+			SetTagRecursively(child.gameObject, tag);
+		}
+	}
+
+	/// <summary>
 	/// Coroutine que espera el delay y luego clona el cuerpo muerto
 	/// Cada cliente crea su propia copia local
 	/// </summary>
@@ -3370,7 +3420,10 @@ void UpdateTimers()
 		// Clonar este GameObject completo
 		GameObject deadBodyClone = Instantiate(gameObject, position, rotation);
 		deadBodyClone.name = $"DeadBody_{bodyID}";
-		deadBodyClone.tag = "Food"; // Tag para que carnívoros puedan comerlo
+
+		// Asignar tag "Food" al clon Y a TODOS sus hijos recursivamente
+		SetTagRecursively(deadBodyClone, "Food");
+		Debug.Log($"🏷️ Tag 'Food' asignado al clon y todos sus hijos");
 
 		// 🎭 IMPORTANTE: Destruir el Animator INMEDIATAMENTE para mantener la pose actual
 		// No configurar parámetros, solo destruir para fijar la pose en la que está
@@ -3382,26 +3435,38 @@ void UpdateTimers()
 			Debug.Log("🎭 Animator del clon destruido, pose fijada");
 		}
 
-		// 📷 Destruir cámaras del clon para evitar conflictos
+		// 📷 Desactivar cámaras del clon (NO destruirlas, solo desactivarlas)
 		Camera[] cloneCameras = deadBodyClone.GetComponentsInChildren<Camera>();
 		foreach (Camera cam in cloneCameras)
 		{
-			Destroy(cam.gameObject);
-			Debug.Log("📷 Cámara del clon destruida");
+			cam.enabled = false;
+			Debug.Log("📷 Cámara del clon desactivada (no destruida)");
 		}
 
-		// Eliminar scripts innecesarios del clon
+		// 🗑️ ELIMINAR COMPONENTES SOLO DEL OBJETO RAÍZ (NO DE LOS HIJOS)
+		// Esto permite mantener BoxColliders y otros componentes en los huesos/hijos
+
+		// Eliminar scripts principales del objeto raíz
 		Destroy(deadBodyClone.GetComponent<SimpleDinosaurController>());
 		Destroy(deadBodyClone.GetComponent<CharacterController>());
 		Destroy(deadBodyClone.GetComponent<PhotonView>());
 		Destroy(deadBodyClone.GetComponent<PhotonTransformView>());
 
-		// Eliminar otros componentes opcionales si existen
+		// Eliminar sistemas opcionales del objeto raíz
 		HealthSystem healthSystem = deadBodyClone.GetComponent<HealthSystem>();
 		if (healthSystem != null) Destroy(healthSystem);
 
 		DinosaurSleepSystem sleepSystem = deadBodyClone.GetComponent<DinosaurSleepSystem>();
 		if (sleepSystem != null) Destroy(sleepSystem);
+
+		// Eliminar TODOS los Colliders del objeto raíz (pero NO de los hijos)
+		// Esto permite tener BoxColliders en los pivots de los huesos
+		Collider[] rootColliders = deadBodyClone.GetComponents<Collider>();
+		foreach (Collider collider in rootColliders)
+		{
+			Destroy(collider);
+			Debug.Log($"🗑️ Collider del objeto raíz eliminado: {collider.GetType().Name}");
+		}
 
 		// Asegurarse de que los renderers estén activos
 		Renderer[] cloneRenderers = deadBodyClone.GetComponentsInChildren<Renderer>();
@@ -3417,19 +3482,13 @@ void UpdateTimers()
 		deadBody.bodyID = bodyID.ToString();
 		deadBody.eatingSounds = deadBodyEatingSounds;
 
-		// Agregar collider si no tiene (para detección de comida)
-		Collider col = deadBodyClone.GetComponent<Collider>();
-		if (col == null)
-		{
-			CapsuleCollider capsule = deadBodyClone.AddComponent<CapsuleCollider>();
-			capsule.isTrigger = true;
-			capsule.radius = 1.5f;
-			capsule.height = 3f;
-		}
-		else
-		{
-			col.isTrigger = true;
-		}
+		// Agregar un nuevo CapsuleCollider trigger al objeto raíz para detección de comida
+		// (Los colliders de los huesos/hijos se mantienen intactos)
+		CapsuleCollider capsule = deadBodyClone.AddComponent<CapsuleCollider>();
+		capsule.isTrigger = true;
+		capsule.radius = 1.5f;
+		capsule.height = 3f;
+		Debug.Log("✅ CapsuleCollider trigger agregado al cuerpo muerto para detección de comida");
 
 		Debug.Log($"✅ Cuerpo muerto clonado con {meatAmount} de carne. ID: {bodyID}");
 	}
