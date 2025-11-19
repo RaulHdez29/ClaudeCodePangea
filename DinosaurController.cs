@@ -627,6 +627,14 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
 		// ⚡ Cachear referencia al sistema de sueño
 		sleepSystemCache = GetComponent<DinosaurSleepSystem>();
+		if (sleepSystemCache != null)
+		{
+			Debug.Log("✅ DinosaurSleepSystem encontrado y cacheado correctamente");
+		}
+		else
+		{
+			Debug.LogWarning("⚠️ DinosaurSleepSystem NO encontrado! La curación de sangrado al dormir no funcionará");
+		}
 
         // 🎭 Inicializar sistema de idle variations
         ResetIdleVariationTimer();
@@ -2498,23 +2506,37 @@ void UpdateTimers()
         }
 
         // 💤 CURACIÓN AL DORMIR
-        if (sleepSystemCache != null && sleepSystemCache.IsSleeping)
+        // Debug detallado para diagnosticar problemas
+        if (bleedingStacks > 0)
         {
-            bleedingHealTimer += Time.deltaTime;
-            if (bleedingHealTimer >= bleedingHealInterval)
+            if (sleepSystemCache == null)
             {
-                bleedingHealTimer = 0f;
-
-                // Curar puntos de sangrado
-                int healAmount = Mathf.RoundToInt(bleedingHealPerTick);
-                RemoveBleedingStacks(healAmount);
-                Debug.Log($"💤 Curando sangrado mientras duerme. Cantidad curada: {healAmount}. Stacks restantes: {bleedingStacks}");
+                Debug.LogWarning("⚠️ sleepSystemCache es NULL! No se puede verificar si está durmiendo");
             }
-        }
-        else if (bleedingStacks > 0)
-        {
-            // Resetear timer si no está durmiendo
-            bleedingHealTimer = 0f;
+            else
+            {
+                bool isSleeping = sleepSystemCache.IsSleeping;
+                if (isSleeping)
+                {
+                    bleedingHealTimer += Time.deltaTime;
+                    Debug.Log($"💤 Durmiendo con sangrado. Timer: {bleedingHealTimer}/{bleedingHealInterval}");
+
+                    if (bleedingHealTimer >= bleedingHealInterval)
+                    {
+                        bleedingHealTimer = 0f;
+
+                        // Curar puntos de sangrado
+                        int healAmount = Mathf.RoundToInt(bleedingHealPerTick);
+                        RemoveBleedingStacks(healAmount);
+                        Debug.Log($"✅ CURADO! Sangrado reducido en {healAmount}. Stacks restantes: {bleedingStacks}");
+                    }
+                }
+                else
+                {
+                    // Resetear timer si no está durmiendo
+                    bleedingHealTimer = 0f;
+                }
+            }
         }
 
         // 💧 SPAWN PERIÓDICO DEL PARTICLE CONTINUO
@@ -2606,10 +2628,13 @@ void UpdateTimers()
         int previousStacks = bleedingStacks;
         bleedingStacks = Mathf.Max(0, bleedingStacks - stacks);
 
+        Debug.Log($"🩹 RemoveBleedingStacks llamado. Anterior: {previousStacks}, Removiendo: {stacks}, Nuevo: {bleedingStacks}");
+
         if (bleedingStacks != previousStacks)
         {
             // 🌐 Sincronizar curación con todos los clientes
             photonView.RPC("RPC_SetBleedingStacks", RpcTarget.All, bleedingStacks);
+            Debug.Log($"📡 RPC enviado para sincronizar bleeding stacks: {bleedingStacks}");
         }
     }
 
@@ -3347,6 +3372,24 @@ void UpdateTimers()
 		deadBodyClone.name = $"DeadBody_{bodyID}";
 		deadBodyClone.tag = "Food"; // Tag para que carnívoros puedan comerlo
 
+		// 🎭 IMPORTANTE: Destruir el Animator INMEDIATAMENTE para mantener la pose actual
+		// No configurar parámetros, solo destruir para fijar la pose en la que está
+		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
+		if (cloneAnimator != null)
+		{
+			// Destruir el Animator mantiene la pose actual de los huesos
+			Destroy(cloneAnimator);
+			Debug.Log("🎭 Animator del clon destruido, pose fijada");
+		}
+
+		// 📷 Destruir cámaras del clon para evitar conflictos
+		Camera[] cloneCameras = deadBodyClone.GetComponentsInChildren<Camera>();
+		foreach (Camera cam in cloneCameras)
+		{
+			Destroy(cam.gameObject);
+			Debug.Log("📷 Cámara del clon destruida");
+		}
+
 		// Eliminar scripts innecesarios del clon
 		Destroy(deadBodyClone.GetComponent<SimpleDinosaurController>());
 		Destroy(deadBodyClone.GetComponent<CharacterController>());
@@ -3365,26 +3408,6 @@ void UpdateTimers()
 		foreach (Renderer rend in cloneRenderers)
 		{
 			rend.enabled = true;
-		}
-
-		// 🎭 Configurar el Animator del clon para que quede en pose de muerte
-		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
-		if (cloneAnimator != null)
-		{
-			// Fijar los mismos parámetros que en RPC_Die para mantener la animación de muerte
-			cloneAnimator.SetBool("IsDead", true);
-			cloneAnimator.SetTrigger("Death");
-			cloneAnimator.SetBool("IsEating", false);
-			cloneAnimator.SetBool("IsDrinking", false);
-			cloneAnimator.SetBool("IsAttacking", false);
-			cloneAnimator.SetBool("IsRunning", false);
-			cloneAnimator.SetFloat("Speed", 0f);
-			cloneAnimator.SetFloat("MoveX", 0f);
-			cloneAnimator.SetFloat("MoveZ", 0f);
-
-			// Iniciar coroutine para desactivar el Animator después de que termine la animación
-			// Esto permite que la animación de muerte se reproduzca y luego quede fija
-			StartCoroutine(DisableAnimatorAfterDelay(cloneAnimator, 0.5f));
 		}
 
 		// Agregar el script DeadBody
@@ -3409,20 +3432,6 @@ void UpdateTimers()
 		}
 
 		Debug.Log($"✅ Cuerpo muerto clonado con {meatAmount} de carne. ID: {bodyID}");
-	}
-
-	/// <summary>
-	/// Coroutine para desactivar el Animator después de un delay
-	/// Esto permite que la animación se reproduzca y luego quede fija
-	/// </summary>
-	System.Collections.IEnumerator DisableAnimatorAfterDelay(Animator anim, float delay)
-	{
-		yield return new WaitForSeconds(delay);
-		if (anim != null)
-		{
-			anim.enabled = false;
-			Debug.Log("🎭 Animator del cuerpo muerto desactivado, pose fija");
-		}
 	}
 
 	/// <summary>
