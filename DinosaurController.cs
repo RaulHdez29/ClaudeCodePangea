@@ -2508,7 +2508,13 @@ void UpdateTimers()
                 // Curar puntos de sangrado
                 int healAmount = Mathf.RoundToInt(bleedingHealPerTick);
                 RemoveBleedingStacks(healAmount);
+                Debug.Log($"💤 Curando sangrado mientras duerme. Cantidad curada: {healAmount}. Stacks restantes: {bleedingStacks}");
             }
+        }
+        else if (bleedingStacks > 0)
+        {
+            // Resetear timer si no está durmiendo
+            bleedingHealTimer = 0f;
         }
 
         // 💧 SPAWN PERIÓDICO DEL PARTICLE CONTINUO
@@ -3295,31 +3301,23 @@ void UpdateTimers()
 			controller.enabled = false;
 		}
 
-		// 💀 NUEVO: Notificar a todos los clientes para crear el cuerpo muerto
+		// 💀 NUEVO: Crear el cuerpo muerto directamente (ya estamos en un RPC, no necesitamos otro)
 		if (enableDeadBodySystem)
 		{
-			// Enviar RPC a TODOS los clientes (incluido este) para crear el cuerpo
-			// Usamos el photonView.ViewID como identificador único del cuerpo
-			photonView.RPC("RPC_SpawnDeadBody", RpcTarget.All,
+			// Llamar directamente a la coroutine sin otro RPC
+			StartCoroutine(SpawnDeadBodyAfterDelay(
 				transform.position,
 				transform.rotation,
 				photonView.ViewID,
 				deadBodySpawnDelay,
-				deadBodyMeatAmount);
+				deadBodyMeatAmount));
 		}
 
 		// Desactivar este script
 		this.enabled = false;
 	}
 
-	/// <summary>
-	/// RPC que todos los clientes ejecutan para crear su copia local del cuerpo muerto
-	/// </summary>
-	[PunRPC]
-	void RPC_SpawnDeadBody(Vector3 position, Quaternion rotation, int viewID, float delay, float meatAmount)
-	{
-		StartCoroutine(SpawnDeadBodyAfterDelay(position, rotation, viewID, delay, meatAmount));
-	}
+	// Ya no necesitamos RPC_SpawnDeadBody porque se llama directamente desde RPC_Die
 
 	/// <summary>
 	/// Coroutine que espera el delay y luego clona el cuerpo muerto
@@ -3369,6 +3367,26 @@ void UpdateTimers()
 			rend.enabled = true;
 		}
 
+		// 🎭 Configurar el Animator del clon para que quede en pose de muerte
+		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
+		if (cloneAnimator != null)
+		{
+			// Fijar los mismos parámetros que en RPC_Die para mantener la animación de muerte
+			cloneAnimator.SetBool("IsDead", true);
+			cloneAnimator.SetTrigger("Death");
+			cloneAnimator.SetBool("IsEating", false);
+			cloneAnimator.SetBool("IsDrinking", false);
+			cloneAnimator.SetBool("IsAttacking", false);
+			cloneAnimator.SetBool("IsRunning", false);
+			cloneAnimator.SetFloat("Speed", 0f);
+			cloneAnimator.SetFloat("MoveX", 0f);
+			cloneAnimator.SetFloat("MoveZ", 0f);
+
+			// Iniciar coroutine para desactivar el Animator después de que termine la animación
+			// Esto permite que la animación de muerte se reproduzca y luego quede fija
+			StartCoroutine(DisableAnimatorAfterDelay(cloneAnimator, 0.5f));
+		}
+
 		// Agregar el script DeadBody
 		DeadBody deadBody = deadBodyClone.AddComponent<DeadBody>();
 		deadBody.meatAmount = meatAmount;
@@ -3391,6 +3409,20 @@ void UpdateTimers()
 		}
 
 		Debug.Log($"✅ Cuerpo muerto clonado con {meatAmount} de carne. ID: {bodyID}");
+	}
+
+	/// <summary>
+	/// Coroutine para desactivar el Animator después de un delay
+	/// Esto permite que la animación se reproduzca y luego quede fija
+	/// </summary>
+	System.Collections.IEnumerator DisableAnimatorAfterDelay(Animator anim, float delay)
+	{
+		yield return new WaitForSeconds(delay);
+		if (anim != null)
+		{
+			anim.enabled = false;
+			Debug.Log("🎭 Animator del cuerpo muerto desactivado, pose fija");
+		}
 	}
 
 	/// <summary>
