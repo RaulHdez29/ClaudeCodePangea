@@ -68,6 +68,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Header("Referencias")]
     public Animator animator;
     public AudioSource audioSource;
+    [Tooltip("AudioSource especial para sonidos de comer y beber (opcional)")]
+    public AudioSource eatDrinkAudioSource;
     public Transform cameraTransform;
     
     [Header("Controles Táctiles")]
@@ -100,6 +102,22 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public float runSpeed = 5f;
     public float crouchSpeed = 1f;
     public float turnSpeed = 120f;
+
+    [Header("🏃‍♂️ SISTEMA DE DESLIZAMIENTO (Slide)")]
+    [Tooltip("Permite deslizarse al agacharse mientras corre")]
+    public bool enableSliding = true;
+    [Tooltip("Velocidad mínima para activar el deslizamiento")]
+    public float slideMinSpeed = 3f;
+    [Tooltip("Multiplicador de velocidad inicial del deslizamiento (1.0 = mantiene velocidad)")]
+    [Range(0.5f, 1.5f)]
+    public float slideSpeedMultiplier = 1.2f;
+    [Tooltip("Deceleración del deslizamiento (más alto = frena más rápido)")]
+    [Range(1f, 10f)]
+    public float slideDeceleration = 3f;
+    [Tooltip("Velocidad mínima para mantener el deslizamiento")]
+    public float slideStopSpeed = 0.5f;
+    [Tooltip("Duración máxima del deslizamiento (segundos)")]
+    public float slideMaxDuration = 2f;
     
     [Header("🔄 CONFIGURACIÓN DE RADIO DE GIRO - MEJORADO")]
     [Tooltip("Radio mínimo de giro al caminar")]
@@ -195,6 +213,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public bool canMoveWhileAttacking = false;
     [Tooltip("Puede rotar mientras ataca")]
     public bool canRotateWhileAttacking = true;
+    [Tooltip("⏱️ Duración de la ventana de daño activa (tiempo en que puede hacer daño durante el ataque)")]
+    public float attackDamageWindow = 2f;
     
     [Header("🎵 AUDIO DE ATAQUE")]
     public AudioClip[] attackSounds;
@@ -240,12 +260,18 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public float staminaSleepRegenRate = 15f;
 
 	[Header("🍗 Sistema de Comer/Beber")]
+	[Tooltip("¿Es carnívoro? (si no, es herbívoro)")]
+	public bool isCarnivore = true;
 	[Tooltip("Distancia para detectar comida/agua")]
 	public float foodDetectionRange = 3f;
 	[Tooltip("Velocidad de aumento de hambre al comer")]
 	public float eatingSpeed = 15f;
 	[Tooltip("Velocidad de aumento de sed al beber")]
 	public float drinkingSpeed = 20f;
+	[Tooltip("Sonidos de comer (se reproducen por eventos de animación)")]
+	public AudioClip[] eatingSounds;
+	[Tooltip("Sonidos de beber (se reproducen por eventos de animación)")]
+	public AudioClip[] drinkingSounds;
 	[Tooltip("Duración de animación de comer")]
 	public float eatingAnimationDuration = 2f;
 
@@ -271,6 +297,60 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
 	// Referencia cacheada al sistema de sueño
 	private DinosaurSleepSystem sleepSystemCache;
+
+	[Header("🌊 Sonidos de Agua")]
+	[Tooltip("Sonidos de pisadas en agua (se reproducen automáticamente cuando está en agua sin nadar)")]
+	public AudioClip[] waterStepSounds;
+
+	[Header("🩸 Sistema de Sangrado")]
+	[Tooltip("Porcentaje de probabilidad de causar sangrado al atacar (0-100)")]
+	[Range(0f, 100f)]
+	public float bleedingChance = 30f;
+	[Tooltip("Daño por segundo que causa cada punto de sangrado")]
+	public float bleedingDamagePerStack = 0.5f;
+	[Tooltip("Intervalo de tiempo entre ticks de daño de sangrado (segundos)")]
+	public float bleedingDamageInterval = 1f;
+	[Tooltip("Puntos de sangrado que se curan cada tick al dormir")]
+	public float bleedingHealPerTick = 1f;
+	[Tooltip("Intervalo de tiempo entre ticks de curación al dormir (segundos)")]
+	public float bleedingHealInterval = 2f;
+
+	[Header("🩸 Visuales de Sangrado")]
+	[Tooltip("Punto de spawn para efectos de sangrado (ej: cabeza, cuerpo)")]
+	public Transform bleedingSpawnPoint;
+	[Tooltip("GameObject que se activa cuando hay sangrado (sangre en el modelo)")]
+	public GameObject bleedingVisualObject;
+	[Tooltip("Prefab del Particle System de IMPACTO (se instancia cuando recibe golpe)")]
+	public ParticleSystem bleedingHitParticleSystem;
+	[Tooltip("Prefab del Particle System CONTINUO (se instancia cada X segundos mientras sangra)")]
+	public ParticleSystem bleedingDripParticleSystem;
+	[Tooltip("Intervalo de spawn del particle continuo (segundos)")]
+	public float bleedingDripSpawnInterval = 3f;
+	[Tooltip("TextMeshPro para mostrar cantidad de sangrado")]
+	public TMPro.TextMeshProUGUI bleedingText;
+	[Tooltip("Sonidos cuando se aplica sangrado")]
+	public AudioClip[] bleedingSounds;
+
+	// Variables privadas de sangrado
+	private int bleedingStacks = 0;
+	private float bleedingDamageTimer = 0f;
+	private float bleedingHealTimer = 0f;
+	private float bleedingDripSpawnTimer = 0f;
+	private bool wasEnteredWaterRecently = false;
+
+	[Header("💀 SISTEMA DE CUERPOS MUERTOS")]
+	[Tooltip("Activar sistema de cuerpos muertos al morir")]
+	public bool enableDeadBodySystem = true;
+	[Tooltip("Delay antes de ocultar el renderer y spawmear el cuerpo (segundos)")]
+	public float deadBodySpawnDelay = 3f;
+	[Tooltip("Cantidad de carne inicial en el cuerpo muerto")]
+	public float deadBodyMeatAmount = 500f;
+	[Tooltip("🍖 Cuánta carne consume este dinosaurio por mordida al comer cuerpos")]
+	public float meatPerBite = 100f;
+	[Tooltip("⏱️ Intervalo entre mordidas al comer cuerpos (segundos)")]
+	public float meatConsumptionInterval = 2f;
+	[Tooltip("Sonidos de comer para el cuerpo muerto")]
+	public AudioClip[] deadBodyEatingSounds;
 
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
@@ -400,7 +480,13 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private Vector3 velocity;
     private float currentSpeed = 0f;
     private float targetSpeed = 0f;
-    
+
+    // 🏃‍♂️ Variables de deslizamiento
+    private bool isSliding = false;
+    private float slideSpeed = 0f;
+    private Vector3 slideDirection = Vector3.zero;
+    private float slideTimer = 0f;
+
     // ⭐ VARIABLES DE RADIO DE GIRO NATURAL
     private Vector3 currentMoveDirection;
     private Vector3 targetMoveDirection;
@@ -453,6 +539,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private Collider waterCollider = null;
     private float waterSurfaceY = 0f;
     private bool wasInWater = false;
+    private bool isTouchingWater = false; // ⭐ Detecta si está tocando agua (incluso poco profunda)
 
 
     void Start()
@@ -540,9 +627,24 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
 		// ⚡ Cachear referencia al sistema de sueño
 		sleepSystemCache = GetComponent<DinosaurSleepSystem>();
+		if (sleepSystemCache != null)
+		{
+			Debug.Log("✅ DinosaurSleepSystem encontrado y cacheado correctamente");
+		}
+		else
+		{
+			Debug.LogWarning("⚠️ DinosaurSleepSystem NO encontrado! La curación de sangrado al dormir no funcionará");
+		}
 
         // 🎭 Inicializar sistema de idle variations
         ResetIdleVariationTimer();
+
+		// 🩸 Inicializar visuales de sangrado (desactivados al inicio)
+		// Nota: bleedingHitParticleSystem y bleedingDripParticleSystem son prefabs que se instancian, no necesitan Stop()
+		if (bleedingVisualObject != null)
+			bleedingVisualObject.SetActive(false);
+		if (bleedingText != null)
+			bleedingText.gameObject.SetActive(false);
 
         SetupButtonListeners();
     }
@@ -563,9 +665,37 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         {
             crouchButton.onClick.RemoveAllListeners();
             crouchButton.onClick.AddListener(() => {
-                isCrouching = !isCrouching;
-                // Ya no desactivamos isRunning aquí
-                // El usuario puede tener run activo y crouch al mismo tiempo
+                // Si ya está agachado, levantarse
+                if (isCrouching)
+                {
+                    isCrouching = false;
+
+                    // Si estaba deslizándose, detener el slide
+                    if (isSliding)
+                    {
+                        StopSlide();
+                    }
+                }
+                // Si no está agachado, agacharse o hacer slide según velocidad
+                else
+                {
+                    // 🏃‍♂️ PRIMERO desactivar correr (si está activo) para permitir agacharse
+                    if (isRunning)
+                    {
+                        isRunning = false;
+                    }
+
+                    // Si está moviéndose rápido y puede hacer slide, activar deslizamiento
+                    if (enableSliding && currentSpeed >= slideMinSpeed && controller.isGrounded)
+                    {
+                        StartSlide();
+                    }
+                    else
+                    {
+                        // Agacharse normalmente (velocidad baja o sin condiciones para slide)
+                        isCrouching = true;
+                    }
+                }
             });
         }
 
@@ -830,14 +960,23 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 		// 🍖 Actualizar hambre, sed y estamina
 		UpdateHungerThirstStamina();
 
+		// 🩸 Actualizar sistema de sangrado
+		UpdateBleedingSystem();
+
 		// 🍗 Detectar comida y agua cercana
 		DetectFoodAndWater();
 
         // Detectar pendientes
         CheckSlope();
 
-        // Calcular movimiento y rotación
-        CalculateMovement();
+		// 🏃‍♂️ Actualizar sistema de deslizamiento
+		UpdateSliding();
+
+        // Calcular movimiento y rotación (se salta si está deslizándose)
+        if (!isSliding)
+        {
+            CalculateMovement();
+        }
 
         // ⭐ FIX: Aplicar rotación separada
         ApplySeparatedRotation();
@@ -999,6 +1138,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                     targetSpeed = isRunning ? runSpeed : walkSpeed;
                 }
             }
+
+            // ⭐ NUEVO: Escalar velocidad según la magnitud del joystick
+            // Si el joystick está a 50%, el dinosaurio se mueve al 50% de la velocidad máxima
+            targetSpeed *= inputVector.magnitude;
 
             // Reducir velocidad durante el giro (no aplica en agua)
             if (!isInWater)
@@ -1196,8 +1339,113 @@ void ApplyMovement()
 
 }
 
+    // ═══════════════════════════════════════════════════════════
+    // 🏃‍♂️ SISTEMA DE DESLIZAMIENTO (SLIDE)
+    // ═══════════════════════════════════════════════════════════
 
-    
+    /// <summary>
+    /// Inicia el deslizamiento cuando se agacha mientras corre
+    /// </summary>
+    void StartSlide()
+    {
+        if (isSliding) return; // Ya está deslizándose
+
+        isSliding = true;
+        isCrouching = true;
+        // Nota: isRunning ya fue desactivado en el botón crouch antes de llamar a StartSlide()
+
+        // Guardar dirección actual del movimiento
+        slideDirection = currentMoveDirection.magnitude > 0.1f ? currentMoveDirection.normalized : transform.forward;
+
+        // Aplicar velocidad inicial del slide (con multiplicador)
+        slideSpeed = currentSpeed * slideSpeedMultiplier;
+
+        // Resetear timer
+        slideTimer = 0f;
+
+        Debug.Log($"🏃‍♂️ Slide iniciado! Velocidad: {slideSpeed:F2}");
+    }
+
+    /// <summary>
+    /// Actualiza la física del deslizamiento
+    /// </summary>
+    void UpdateSliding()
+    {
+        if (!isSliding) return;
+
+        slideTimer += Time.deltaTime;
+
+        // Reducir velocidad gradualmente
+        slideSpeed = Mathf.Lerp(slideSpeed, 0f, Time.deltaTime * slideDeceleration);
+
+        // Aplicar movimiento en la dirección del slide
+        moveDirection = slideDirection * slideSpeed;
+
+        // Actualizar currentSpeed para las animaciones
+        currentSpeed = slideSpeed;
+        targetSpeed = slideSpeed;
+
+        // Condiciones para detener el slide
+        bool shouldStopSlide = false;
+
+        // 1. Velocidad muy baja
+        if (slideSpeed < slideStopSpeed)
+        {
+            shouldStopSlide = true;
+            Debug.Log("🛑 Slide detenido: velocidad baja");
+        }
+
+        // 2. Duración máxima alcanzada
+        if (slideTimer >= slideMaxDuration)
+        {
+            shouldStopSlide = true;
+            Debug.Log("🛑 Slide detenido: duración máxima");
+        }
+
+        // 3. En el aire (perdió contacto con el suelo)
+        if (!controller.isGrounded)
+        {
+            shouldStopSlide = true;
+            Debug.Log("🛑 Slide detenido: en el aire");
+        }
+
+        // 4. Jugador intenta moverse en otra dirección (opcional)
+        if (inputVector.magnitude > 0.3f)
+        {
+            Vector3 inputDirection = (cameraTransform.forward * inputVector.z + cameraTransform.right * inputVector.x).normalized;
+            float angleDifference = Vector3.Angle(slideDirection, inputDirection);
+
+            // Si intenta moverse en dirección opuesta (más de 90 grados)
+            if (angleDifference > 90f)
+            {
+                shouldStopSlide = true;
+                Debug.Log("🛑 Slide detenido: cambio de dirección");
+            }
+        }
+
+        if (shouldStopSlide)
+        {
+            StopSlide();
+        }
+    }
+
+    /// <summary>
+    /// Detiene el deslizamiento
+    /// </summary>
+    void StopSlide()
+    {
+        if (!isSliding) return;
+
+        isSliding = false;
+        slideSpeed = 0f;
+        slideDirection = Vector3.zero;
+
+        // El jugador sigue agachado, pero puede levantarse presionando el botón de nuevo
+        Debug.Log("✅ Slide completado");
+    }
+
+
+
     void AlignToTerrainFixed()
     {
         // ⭐ FIX: Nueva implementación que no afecta la rotación Y
@@ -1282,6 +1530,23 @@ void UpdateAnimations()
         normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
     }
     animator.SetFloat("Speed", normalizedSpeed);
+
+    // ⭐ NUEVO: Ajustar velocidad de animación según magnitud del joystick
+    // Si el joystick está a 50%, la animación se reproduce al 50% de velocidad
+    // Esto hace que caminar lento se vea más natural
+    if (inputVector.magnitude > 0.01f && !isPlayingIdleVariation)
+    {
+        // Calcular velocidad de animación: rango entre 0.3 y 1.0
+        // Mínimo de 0.3 para que no se vea demasiado lento, máximo 1.0 para velocidad normal
+        float minAnimSpeed = 0.3f;
+        float animSpeed = Mathf.Lerp(minAnimSpeed, 1f, inputVector.magnitude);
+        animator.speed = animSpeed;
+    }
+    else
+    {
+        // Sin movimiento o en idle variation, velocidad normal
+        animator.speed = 1f;
+    }
 
     // 🔹 2. Estados principales
     animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
@@ -1598,6 +1863,14 @@ void UpdateAnimations()
         if (isAttacking)
         {
             attackTimer -= Time.deltaTime;
+
+            // ⚔️ NUEVA VENTANA DE DAÑO: Verificar continuamente si hay enemigos en rango
+            // Esto permite que enemigos que entren durante la animación reciban daño
+            if (photonView.IsMine)
+            {
+                PerformAttackDamage();
+            }
+
             if (attackTimer <= 0f)
             {
                 EndAttack();
@@ -1680,11 +1953,13 @@ void UpdateAnimations()
     void RPC_ExecuteAttack()
     {
         isAttacking = true;
-        attackTimer = attackDuration;
+        // ⏱️ NUEVA VENTANA DE DAÑO: El attackTimer ahora usa attackDamageWindow
+        // Durante este tiempo, el dinosaurio puede hacer daño a enemigos que entren en su rango
+        attackTimer = attackDamageWindow;
         attackCooldownTimer = attackCooldown;
         currentState = MovementState.Attacking;
 
-        // Limpiar lista de enemigos golpeados
+        // Limpiar lista de enemigos golpeados (cada enemigo solo puede ser golpeado UNA vez por mordida)
         enemiesHit.Clear();
 
         // 🌐 ANIMACIÓN - Se ejecuta en TODOS los clientes para que todos vean el ataque
@@ -1697,11 +1972,8 @@ void UpdateAnimations()
         // Sonido (se ejecuta en todos los clientes)
         PlayAttackSound();
 
-        // 🌐 Hacer daño SOLO en el cliente que atacó (el dueño)
-        if (photonView.IsMine)
-        {
-            PerformAttackDamage();
-        }
+        // 🌐 El daño se aplicará continuamente en Update() mientras attackTimer > 0 (solo en el dueño)
+        // Esto permite que enemigos que entren en el rango durante la animación reciban daño
     }
     
     void PerformAttackDamage()
@@ -1733,6 +2005,18 @@ void UpdateAnimations()
                 {
                     // Atacar a otro jugador a través de RPC
                     targetPhotonView.RPC("RPC_TakeDamage", RpcTarget.All, attackDamage, photonView.ViewID);
+
+                    // 🩸 Probabilidad de causar sangrado
+                    float randomChance = Random.Range(0f, 100f);
+                    if (randomChance <= bleedingChance)
+                    {
+                        // Aplicar 1 stack de sangrado
+                        SimpleDinosaurController targetController = hit.GetComponent<SimpleDinosaurController>();
+                        if (targetController != null)
+                        {
+                            targetController.ApplyBleeding(1);
+                        }
+                    }
                 }
                 else
                 {
@@ -2070,6 +2354,16 @@ void UpdateTimers()
     {
         if (audioSource != null)
         {
+            // 🌊 Prioridad: Si está tocando agua pero NO nadando, reproducir sonido de agua
+            // Usa isTouchingWater en lugar de isInWater para detectar agua poco profunda
+            if (isTouchingWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
+            {
+                AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
+                audioSource.PlayOneShot(clip, 0.6f);
+                return; // Salir para no reproducir el sonido normal
+            }
+
+            // Sonidos normales (tierra)
             AudioClip[] clips = isRunning ? runSounds : walkSounds;
             if (clips.Length > 0)
             {
@@ -2084,6 +2378,16 @@ void UpdateTimers()
     {
         if (audioSource != null)
         {
+            // 🌊 Prioridad: Si está tocando agua pero NO nadando, reproducir sonido de agua
+            // Usa isTouchingWater en lugar de isInWater para detectar agua poco profunda
+            if (isTouchingWater && !isSwimming && waterStepSounds != null && waterStepSounds.Length > 0)
+            {
+                AudioClip clip = waterStepSounds[Random.Range(0, waterStepSounds.Length)];
+                audioSource.PlayOneShot(clip, 0.5f); // Más bajo en crouch
+                return; // Salir para no reproducir el sonido normal
+            }
+
+            // Sonidos normales de crouch
             if (crouchWalkSounds.Length > 0)
             {
                 AudioClip clip = crouchWalkSounds[Random.Range(0, crouchWalkSounds.Length)];
@@ -2109,7 +2413,280 @@ void UpdateTimers()
             audioSource.PlayOneShot(clip);
         }
     }
-    
+
+    // ═══════════════════════════════════════════════════════════
+    // 🍗 MÉTODOS DE SONIDOS DE COMER/BEBER (llamados por Animation Events)
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Reproduce sonido de comer (llamado por Animation Event)
+    /// </summary>
+    public void PlayEatingSound()
+    {
+        if (eatingSounds != null && eatingSounds.Length > 0)
+        {
+            // Usar AudioSource especial si está asignado, sino usar el principal
+            AudioSource sourceToUse = eatDrinkAudioSource != null ? eatDrinkAudioSource : audioSource;
+
+            if (sourceToUse != null)
+            {
+                AudioClip clip = eatingSounds[Random.Range(0, eatingSounds.Length)];
+                sourceToUse.PlayOneShot(clip);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reproduce sonido de beber (llamado por Animation Event)
+    /// </summary>
+    public void PlayDrinkingSound()
+    {
+        if (drinkingSounds != null && drinkingSounds.Length > 0)
+        {
+            // Usar AudioSource especial si está asignado, sino usar el principal
+            AudioSource sourceToUse = eatDrinkAudioSource != null ? eatDrinkAudioSource : audioSource;
+
+            if (sourceToUse != null)
+            {
+                AudioClip clip = drinkingSounds[Random.Range(0, drinkingSounds.Length)];
+                sourceToUse.PlayOneShot(clip);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🩸 MÉTODOS DE SONIDOS DE SANGRADO
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Reproduce sonido de sangrado (cuando se aplica una herida sangrante)
+    /// </summary>
+    void PlayBleedingSound()
+    {
+        if (audioSource != null && bleedingSounds != null && bleedingSounds.Length > 0)
+        {
+            AudioClip clip = bleedingSounds[Random.Range(0, bleedingSounds.Length)];
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🩸 SISTEMA DE SANGRADO COMPLETO
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Actualiza el sistema de sangrado (daño continuo y curación al dormir)
+    /// </summary>
+    void UpdateBleedingSystem()
+    {
+        if (!photonView.IsMine) return; // Solo el dueño procesa el sangrado
+
+        // Si no hay sangrado, no hacer nada
+        if (bleedingStacks <= 0)
+        {
+            bleedingStacks = 0;
+            UpdateBleedingVisuals();
+            return;
+        }
+
+        // 🩸 DAÑO POR SANGRADO
+        bleedingDamageTimer += Time.deltaTime;
+        if (bleedingDamageTimer >= bleedingDamageInterval)
+        {
+            bleedingDamageTimer = 0f;
+
+            // Aplicar daño por cada stack de sangrado
+            float totalBleedingDamage = bleedingStacks * bleedingDamagePerStack;
+
+            HealthSystem healthSystem = GetComponent<HealthSystem>();
+            if (healthSystem != null)
+            {
+                healthSystem.TakeDamage(totalBleedingDamage);
+            }
+        }
+
+        // 💤 CURACIÓN AL DORMIR
+        // Debug detallado para diagnosticar problemas
+        if (bleedingStacks > 0)
+        {
+            if (sleepSystemCache == null)
+            {
+                Debug.LogWarning("⚠️ sleepSystemCache es NULL! No se puede verificar si está durmiendo");
+            }
+            else
+            {
+                bool isSleeping = sleepSystemCache.IsSleeping;
+                if (isSleeping)
+                {
+                    bleedingHealTimer += Time.deltaTime;
+                    Debug.Log($"💤 Durmiendo con sangrado. Timer: {bleedingHealTimer}/{bleedingHealInterval}");
+
+                    if (bleedingHealTimer >= bleedingHealInterval)
+                    {
+                        bleedingHealTimer = 0f;
+
+                        // Curar puntos de sangrado
+                        int healAmount = Mathf.RoundToInt(bleedingHealPerTick);
+                        RemoveBleedingStacks(healAmount);
+                        Debug.Log($"✅ CURADO! Sangrado reducido en {healAmount}. Stacks restantes: {bleedingStacks}");
+                    }
+                }
+                else
+                {
+                    // Resetear timer si no está durmiendo
+                    bleedingHealTimer = 0f;
+                }
+            }
+        }
+
+        // 💧 SPAWN PERIÓDICO DEL PARTICLE CONTINUO
+        bleedingDripSpawnTimer += Time.deltaTime;
+        if (bleedingDripSpawnTimer >= bleedingDripSpawnInterval)
+        {
+            bleedingDripSpawnTimer = 0f;
+
+            // Instanciar particle continuo
+            if (bleedingDripParticleSystem != null)
+            {
+                // Determinar posición de spawn
+                Vector3 spawnPosition = bleedingSpawnPoint != null ? bleedingSpawnPoint.position : transform.position + Vector3.up * 1f;
+                Quaternion spawnRotation = bleedingSpawnPoint != null ? bleedingSpawnPoint.rotation : Quaternion.identity;
+
+                // Instanciar el particle system
+                ParticleSystem dripInstance = Instantiate(bleedingDripParticleSystem, spawnPosition, spawnRotation);
+
+                // Reproducir el particle
+                dripInstance.Play();
+
+                // Destruir el GameObject después de que termine el particle
+                Destroy(dripInstance.gameObject, dripInstance.main.duration + dripInstance.main.startLifetime.constantMax);
+
+                Debug.Log("💧 Particle de sangrado continuo instanciado");
+            }
+        }
+
+        // Actualizar visuales
+        UpdateBleedingVisuals();
+    }
+
+    /// <summary>
+    /// Aplica sangrado a este dinosaurio (llamado cuando otro dinosaurio lo ataca)
+    /// </summary>
+    /// <param name="stacks">Cantidad de stacks de sangrado a aplicar</param>
+    public void ApplyBleeding(int stacks)
+    {
+        if (stacks <= 0) return;
+
+        // 🌐 Sincronizar sangrado con todos los clientes
+        photonView.RPC("RPC_ApplyBleeding", RpcTarget.All, stacks);
+    }
+
+    [PunRPC]
+    void RPC_ApplyBleeding(int stacks)
+    {
+        bleedingStacks += stacks;
+
+        // Reproducir sonido de sangrado
+        PlayBleedingSound();
+
+        // 🩸 INSTANCIAR particle system de IMPACTO (efecto instantáneo cuando recibe golpe)
+        if (bleedingHitParticleSystem != null)
+        {
+            // Determinar posición de spawn
+            Vector3 spawnPosition = bleedingSpawnPoint != null ? bleedingSpawnPoint.position : transform.position + Vector3.up * 1f;
+            Quaternion spawnRotation = bleedingSpawnPoint != null ? bleedingSpawnPoint.rotation : Quaternion.identity;
+
+            // Instanciar el particle system
+            ParticleSystem hitInstance = Instantiate(bleedingHitParticleSystem, spawnPosition, spawnRotation);
+
+            // Reproducir el particle
+            hitInstance.Play();
+
+            // Destruir el GameObject después de que termine el particle
+            Destroy(hitInstance.gameObject, hitInstance.main.duration + hitInstance.main.startLifetime.constantMax);
+
+            Debug.Log("💥 Particle de impacto instanciado");
+        }
+
+        // Actualizar visuales (NO incluye particle continuo aquí, se maneja en UpdateBleedingSystem)
+        UpdateBleedingVisuals();
+
+        // Resetear el timer del particle continuo para que spawne uno inmediatamente
+        bleedingDripSpawnTimer = bleedingDripSpawnInterval;
+
+        Debug.Log($"🩸 Sangrado aplicado! Stacks totales: {bleedingStacks}");
+    }
+
+    /// <summary>
+    /// Remueve stacks de sangrado (usado al curar al dormir)
+    /// </summary>
+    /// <param name="stacks">Cantidad de stacks a remover</param>
+    void RemoveBleedingStacks(int stacks)
+    {
+        if (stacks <= 0) return;
+
+        int previousStacks = bleedingStacks;
+        bleedingStacks = Mathf.Max(0, bleedingStacks - stacks);
+
+        Debug.Log($"🩹 RemoveBleedingStacks llamado. Anterior: {previousStacks}, Removiendo: {stacks}, Nuevo: {bleedingStacks}");
+
+        if (bleedingStacks != previousStacks)
+        {
+            // 🌐 Sincronizar curación con todos los clientes
+            photonView.RPC("RPC_SetBleedingStacks", RpcTarget.All, bleedingStacks);
+            Debug.Log($"📡 RPC enviado para sincronizar bleeding stacks: {bleedingStacks}");
+        }
+    }
+
+    [PunRPC]
+    void RPC_SetBleedingStacks(int newStacks)
+    {
+        bleedingStacks = newStacks;
+        UpdateBleedingVisuals();
+
+        if (bleedingStacks <= 0)
+        {
+            Debug.Log("💊 Sangrado completamente curado!");
+        }
+    }
+
+    /// <summary>
+    /// Actualiza los visuales de sangrado (GameObject y UI)
+    /// Los particle systems se manejan mediante Instantiate en otros métodos
+    /// </summary>
+    void UpdateBleedingVisuals()
+    {
+        bool hasBleeding = bleedingStacks > 0;
+
+        // 🩸 Activar/desactivar GameObject de sangrado
+        if (bleedingVisualObject != null)
+        {
+            bleedingVisualObject.SetActive(hasBleeding);
+        }
+
+        // 🩸 Actualizar UI de texto
+        if (bleedingText != null)
+        {
+            if (hasBleeding)
+            {
+                bleedingText.gameObject.SetActive(true);
+                bleedingText.text = bleedingStacks.ToString();
+            }
+            else
+            {
+                bleedingText.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Obtiene la cantidad actual de stacks de sangrado
+    /// </summary>
+    public int GetBleedingStacks()
+    {
+        return bleedingStacks;
+    }
+
     void OnDrawGizmosSelected()
     {
         if (!showAttackGizmos) return;
@@ -2207,6 +2784,9 @@ void UpdateTimers()
         // Verificar si el collider está en el layer de agua
         if (((1 << other.gameObject.layer) & waterLayer) != 0)
         {
+            // ⭐ Marcar que está tocando agua (para sonidos de pisadas)
+            isTouchingWater = true;
+
             // Actualizar altura de superficie del agua
             UpdateWaterSurface(other);
 
@@ -2255,6 +2835,7 @@ void UpdateTimers()
     {
         isInWater = false;
         isSwimming = false;
+        isTouchingWater = false; // ⭐ Ya no está tocando agua
         waterCollider = null;
 
         Debug.Log("🏖️ Dinosaurio salió del agua!");
@@ -2318,9 +2899,12 @@ void UpdateTimers()
 		Collider[] foodColliders = Physics.OverlapSphere(transform.position, foodDetectionRange);
 		nearbyFood = null;
 
+		// 🥩 Diferenciar entre carnívoros y herbívoros
+		string foodTag = isCarnivore ? "Food" : "FoodPlant";
+
 		foreach (Collider col in foodColliders)
 		{
-			if (col.CompareTag("Food"))
+			if (col.CompareTag(foodTag))
 			{
 				nearbyFood = col.gameObject;
 				break;
@@ -2413,11 +2997,54 @@ void UpdateTimers()
 	/// </summary>
 	System.Collections.IEnumerator EatingCoroutine()
 	{
+		// 🍖 Detectar si es un cuerpo muerto
+		DeadBody deadBody = nearbyFood != null ? nearbyFood.GetComponent<DeadBody>() : null;
+		bool isEatingDeadBody = deadBody != null;
+
+		// Timer para consumir carne de cuerpos muertos (cada mordida)
+		float meatConsumptionTimer = 0f;
+
 		while (isEating && currentHunger < maxHunger && nearbyFood != null)
 		{
-			// Aumentar hambre gradualmente
-			currentHunger += eatingSpeed * Time.deltaTime;
-			currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+			// 💀 COMER DE CUERPO MUERTO
+			if (isEatingDeadBody && deadBody != null)
+			{
+				meatConsumptionTimer += Time.deltaTime;
+
+				// Consumir carne cada X segundos (mordida)
+				if (meatConsumptionTimer >= this.meatConsumptionInterval)
+				{
+					meatConsumptionTimer = 0f;
+
+					// Calcular cuánta carne consumir esta mordida (configurable por dinosaurio)
+
+					// Verificar si hay carne disponible
+					if (deadBody.currentMeat <= 0f)
+					{
+						Debug.Log("❌ No hay más carne en este cuerpo");
+						StopEating();
+						yield break;
+					}
+
+					// Consumir carne localmente
+					float consumed = Mathf.Min(this.meatPerBite, deadBody.currentMeat);
+
+					// Sincronizar consumo con todos los clientes
+					photonView.RPC("RPC_ConsumeMeatFromBody", RpcTarget.All, deadBody.bodyID, consumed);
+
+					// Aumentar hambre basándose en la carne consumida
+					currentHunger += consumed;
+					currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+					Debug.Log($"🍖 Consumido {consumed} de carne. Hambre: {currentHunger}/{maxHunger}");
+				}
+			}
+			// 🌿 COMER COMIDA NORMAL
+			else
+			{
+				// Aumentar hambre gradualmente
+				currentHunger += eatingSpeed * Time.deltaTime;
+				currentHunger = Mathf.Clamp(currentHunger, 0f, maxHunger);
+			}
 
 			// Si se llenó, dejar de comer automáticamente
 			if (currentHunger >= maxHunger)
@@ -2670,9 +3297,6 @@ void UpdateTimers()
 
 		Debug.Log("💀 Dinosaurio ha muerto!");
 
-		// Detener todas las corrutinas activas
-		StopAllCoroutines();
-
 		// Detener estados
 		isEating = false;
 		isDrinking = false;
@@ -2702,8 +3326,133 @@ void UpdateTimers()
 			controller.enabled = false;
 		}
 
+		// 💀 NUEVO: Crear el cuerpo muerto directamente (ya estamos en un RPC, no necesitamos otro)
+		if (enableDeadBodySystem)
+		{
+			// Llamar directamente a la coroutine sin otro RPC
+			StartCoroutine(SpawnDeadBodyAfterDelay(
+				transform.position,
+				transform.rotation,
+				photonView.ViewID,
+				deadBodySpawnDelay,
+				deadBodyMeatAmount));
+		}
+
 		// Desactivar este script
 		this.enabled = false;
+	}
+
+	// Ya no necesitamos RPC_SpawnDeadBody porque se llama directamente desde RPC_Die
+
+	/// <summary>
+	/// Coroutine que espera el delay y luego clona el cuerpo muerto
+	/// Cada cliente crea su propia copia local
+	/// </summary>
+	System.Collections.IEnumerator SpawnDeadBodyAfterDelay(Vector3 position, Quaternion rotation, int bodyID, float delay, float meatAmount)
+	{
+		Debug.Log($"⏱️ Esperando {delay} segundos antes de spawmear cuerpo...");
+
+		// Esperar a que termine la animación de muerte
+		yield return new WaitForSeconds(delay);
+
+		Debug.Log("💀 Clonando cuerpo muerto...");
+
+		// Ocultar los renderers del jugador original (solo si es nuestro jugador)
+		if (photonView.IsMine)
+		{
+			Renderer[] renderers = GetComponentsInChildren<Renderer>();
+			foreach (Renderer rend in renderers)
+			{
+				rend.enabled = false;
+			}
+		}
+
+		// Clonar este GameObject completo
+		GameObject deadBodyClone = Instantiate(gameObject, position, rotation);
+		deadBodyClone.name = $"DeadBody_{bodyID}";
+		deadBodyClone.tag = "Food"; // Tag para que carnívoros puedan comerlo
+
+		// 🎭 IMPORTANTE: Destruir el Animator INMEDIATAMENTE para mantener la pose actual
+		// No configurar parámetros, solo destruir para fijar la pose en la que está
+		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
+		if (cloneAnimator != null)
+		{
+			// Destruir el Animator mantiene la pose actual de los huesos
+			Destroy(cloneAnimator);
+			Debug.Log("🎭 Animator del clon destruido, pose fijada");
+		}
+
+		// 📷 Destruir cámaras del clon para evitar conflictos
+		Camera[] cloneCameras = deadBodyClone.GetComponentsInChildren<Camera>();
+		foreach (Camera cam in cloneCameras)
+		{
+			Destroy(cam.gameObject);
+			Debug.Log("📷 Cámara del clon destruida");
+		}
+
+		// Eliminar scripts innecesarios del clon
+		Destroy(deadBodyClone.GetComponent<SimpleDinosaurController>());
+		Destroy(deadBodyClone.GetComponent<CharacterController>());
+		Destroy(deadBodyClone.GetComponent<PhotonView>());
+		Destroy(deadBodyClone.GetComponent<PhotonTransformView>());
+
+		// Eliminar otros componentes opcionales si existen
+		HealthSystem healthSystem = deadBodyClone.GetComponent<HealthSystem>();
+		if (healthSystem != null) Destroy(healthSystem);
+
+		DinosaurSleepSystem sleepSystem = deadBodyClone.GetComponent<DinosaurSleepSystem>();
+		if (sleepSystem != null) Destroy(sleepSystem);
+
+		// Asegurarse de que los renderers estén activos
+		Renderer[] cloneRenderers = deadBodyClone.GetComponentsInChildren<Renderer>();
+		foreach (Renderer rend in cloneRenderers)
+		{
+			rend.enabled = true;
+		}
+
+		// Agregar el script DeadBody
+		DeadBody deadBody = deadBodyClone.AddComponent<DeadBody>();
+		deadBody.meatAmount = meatAmount;
+		deadBody.currentMeat = meatAmount;
+		deadBody.bodyID = bodyID.ToString();
+		deadBody.eatingSounds = deadBodyEatingSounds;
+
+		// Agregar collider si no tiene (para detección de comida)
+		Collider col = deadBodyClone.GetComponent<Collider>();
+		if (col == null)
+		{
+			CapsuleCollider capsule = deadBodyClone.AddComponent<CapsuleCollider>();
+			capsule.isTrigger = true;
+			capsule.radius = 1.5f;
+			capsule.height = 3f;
+		}
+		else
+		{
+			col.isTrigger = true;
+		}
+
+		Debug.Log($"✅ Cuerpo muerto clonado con {meatAmount} de carne. ID: {bodyID}");
+	}
+
+	/// <summary>
+	/// RPC para sincronizar el consumo de carne de un cuerpo muerto
+	/// Todos los clientes actualizan el cuerpo con el mismo ID
+	/// </summary>
+	[PunRPC]
+	void RPC_ConsumeMeatFromBody(string bodyID, float amount)
+	{
+		// Buscar el cuerpo muerto por ID
+		DeadBody[] allBodies = FindObjectsOfType<DeadBody>();
+		foreach (DeadBody body in allBodies)
+		{
+			if (body.bodyID == bodyID)
+			{
+				// Consumir carne del cuerpo (esto actualiza currentMeat)
+				body.ConsumeMeat(amount);
+				Debug.Log($"🌐 RPC: Consumido {amount} de carne del cuerpo {bodyID}. Restante: {body.currentMeat}");
+				break;
+			}
+		}
 	}
 
 	// 🌐 PHOTON: Sincronización OPTIMIZADA de datos personalizados
