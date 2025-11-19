@@ -345,6 +345,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public float deadBodySpawnDelay = 3f;
 	[Tooltip("Cantidad de carne inicial en el cuerpo muerto")]
 	public float deadBodyMeatAmount = 500f;
+	[Tooltip("🍖 Cuánta carne consume este dinosaurio por mordida al comer cuerpos")]
+	public float meatPerBite = 100f;
+	[Tooltip("⏱️ Intervalo entre mordidas al comer cuerpos (segundos)")]
+	public float meatConsumptionInterval = 2f;
 	[Tooltip("Sonidos de comer para el cuerpo muerto")]
 	public AudioClip[] deadBodyEatingSounds;
 
@@ -2968,7 +2972,6 @@ void UpdateTimers()
 
 		// Timer para consumir carne de cuerpos muertos (cada mordida)
 		float meatConsumptionTimer = 0f;
-		float meatConsumptionInterval = 2f; // Consumir carne cada 2 segundos (una mordida)
 
 		while (isEating && currentHunger < maxHunger && nearbyFood != null)
 		{
@@ -2978,12 +2981,11 @@ void UpdateTimers()
 				meatConsumptionTimer += Time.deltaTime;
 
 				// Consumir carne cada X segundos (mordida)
-				if (meatConsumptionTimer >= meatConsumptionInterval)
+				if (meatConsumptionTimer >= this.meatConsumptionInterval)
 				{
 					meatConsumptionTimer = 0f;
 
-					// Calcular cuánta carne consumir esta mordida
-					float meatPerBite = 100f; // 100 de carne por mordida
+					// Calcular cuánta carne consumir esta mordida (configurable por dinosaurio)
 
 					// Verificar si hay carne disponible
 					if (deadBody.currentMeat <= 0f)
@@ -2994,7 +2996,7 @@ void UpdateTimers()
 					}
 
 					// Consumir carne localmente
-					float consumed = Mathf.Min(meatPerBite, deadBody.currentMeat);
+					float consumed = Mathf.Min(this.meatPerBite, deadBody.currentMeat);
 
 					// Sincronizar consumo con todos los clientes
 					photonView.RPC("RPC_ConsumeMeatFromBody", RpcTarget.All, deadBody.bodyID, consumed);
