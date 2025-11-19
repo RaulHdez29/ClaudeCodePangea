@@ -64,6 +64,21 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 	[Tooltip("Panel que se muestra cuando el dinosaurio muere")]
 	public GameObject deathPanel;
 
+	[Header("🩸 Sistema de Daño Visual en Shader")]
+	[Tooltip("Activar sistema de daño visual en el shader")]
+	public bool enableShaderDamage = true;
+	[Tooltip("Nombre del parámetro del shader para el daño (por defecto: _DamageAmount)")]
+	public string shaderDamageParameter = "_DamageAmount";
+	[Tooltip("Porcentaje de vida donde empieza a mostrarse daño visual (0-100%)")]
+	[Range(0f, 100f)]
+	public float damageVisualThreshold = 90f;
+	[Tooltip("Intensidad máxima del daño visual (0-1)")]
+	[Range(0f, 1f)]
+	public float maxDamageIntensity = 1f;
+	[Tooltip("Curva de progresión del daño (más pronunciado = daño aparece más rápido)")]
+	[Range(1f, 3f)]
+	public float damageCurve = 1.5f;
+
     [Header("Audio")]
     public AudioClip[] hurtSounds;
     public AudioClip[] deathSounds;
@@ -82,6 +97,10 @@ public class HealthSystem : MonoBehaviourPunCallbacks
     private Renderer[] renderers;
     private Material[] originalMaterials;
     private Camera mainCamera;
+
+    // 🩸 Sistema de daño visual en shader
+    private Material[] runtimeMaterials; // Materiales instanciados en runtime
+    private bool shaderDamageInitialized = false;
     
     void Start()
     {
@@ -99,12 +118,18 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 
         // Obtener renderers para efectos de daño
         renderers = GetComponentsInChildren<Renderer>();
-        if (renderers.Length > 0 && damageMaterial != null)
+        if (renderers.Length > 0)
         {
             originalMaterials = new Material[renderers.Length];
             for (int i = 0; i < renderers.Length; i++)
             {
                 originalMaterials[i] = renderers[i].material;
+            }
+
+            // 🩸 Inicializar sistema de daño visual en shader
+            if (enableShaderDamage)
+            {
+                InitializeShaderDamageSystem();
             }
         }
 
@@ -353,6 +378,12 @@ public class HealthSystem : MonoBehaviourPunCallbacks
         {
             healthBar.fillAmount = currentHealth / maxHealth;
         }
+
+        // 🩸 Actualizar daño visual en shader
+        if (enableShaderDamage && shaderDamageInitialized)
+        {
+            UpdateShaderDamage();
+        }
     }
     
     /// <summary>
@@ -531,6 +562,97 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 		}
 	}
 
+	// ═══════════════════════════════════════════════════════════
+	// 🩸 SISTEMA DE DAÑO VISUAL EN SHADER
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>
+	/// Inicializa el sistema de daño visual en los shaders
+	/// Crea materiales instanciados en runtime para cada renderer
+	/// </summary>
+	void InitializeShaderDamageSystem()
+	{
+		if (renderers == null || renderers.Length == 0)
+		{
+			Debug.LogWarning("⚠️ No hay renderers para aplicar daño visual en shader");
+			return;
+		}
+
+		runtimeMaterials = new Material[renderers.Length];
+
+		for (int i = 0; i < renderers.Length; i++)
+		{
+			if (renderers[i] != null)
+			{
+				// Crear una instancia del material para no afectar otros objetos
+				Material instanceMaterial = new Material(renderers[i].sharedMaterial);
+				renderers[i].material = instanceMaterial;
+				runtimeMaterials[i] = instanceMaterial;
+
+				// Verificar si el material tiene el parámetro de daño
+				if (instanceMaterial.HasProperty(shaderDamageParameter))
+				{
+					// Inicializar en 0 (sin daño visible)
+					instanceMaterial.SetFloat(shaderDamageParameter, 0f);
+					Debug.Log($"✅ Shader damage system inicializado en {renderers[i].name}");
+				}
+				else
+				{
+					Debug.LogWarning($"⚠️ El material '{instanceMaterial.name}' no tiene el parámetro '{shaderDamageParameter}'");
+				}
+			}
+		}
+
+		shaderDamageInitialized = true;
+		Debug.Log($"🩸 Sistema de daño visual en shader inicializado para {renderers.Length} renderers");
+	}
+
+	/// <summary>
+	/// Actualiza el valor de daño visual en los shaders según el porcentaje de vida
+	/// </summary>
+	void UpdateShaderDamage()
+	{
+		if (runtimeMaterials == null || runtimeMaterials.Length == 0)
+			return;
+
+		// Calcular porcentaje de vida (0-100)
+		float healthPercentage = (currentHealth / maxHealth) * 100f;
+
+		// Calcular el valor de daño visual
+		float damageValue = 0f;
+
+		if (healthPercentage < damageVisualThreshold)
+		{
+			// Calcular cuánto ha bajado la vida desde el threshold
+			// Si threshold = 90% y vida = 50%, entonces progress = (90-50) / 90 = 0.44
+			float progress = (damageVisualThreshold - healthPercentage) / damageVisualThreshold;
+
+			// Aplicar curva para hacer el daño más pronunciado
+			progress = Mathf.Pow(progress, damageCurve);
+
+			// Escalar por la intensidad máxima
+			damageValue = progress * maxDamageIntensity;
+
+			// Limitar entre 0 y maxDamageIntensity
+			damageValue = Mathf.Clamp01(damageValue);
+		}
+
+		// Aplicar el valor a todos los materiales
+		foreach (Material mat in runtimeMaterials)
+		{
+			if (mat != null && mat.HasProperty(shaderDamageParameter))
+			{
+				mat.SetFloat(shaderDamageParameter, damageValue);
+			}
+		}
+
+		// Log ocasional para debug (cada 5% de cambio aproximadamente)
+		if (Mathf.Abs(damageValue * 100f - Mathf.Round(damageValue * 100f / 5f) * 5f) < 1f)
+		{
+			Debug.Log($"🩸 Daño visual actualizado: {damageValue:F2} (Vida: {healthPercentage:F1}%)");
+		}
+	}
+
     void OnGUI()
     {
         if (Application.isEditor && !isDead)
@@ -538,7 +660,7 @@ public class HealthSystem : MonoBehaviourPunCallbacks
             Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 2f);
             if (screenPos.z > 0)
             {
-                GUI.Label(new Rect(screenPos.x - 50, Screen.height - screenPos.y - 20, 100, 20), 
+                GUI.Label(new Rect(screenPos.x - 50, Screen.height - screenPos.y - 20, 100, 20),
                          $"HP: {currentHealth:F0}/{maxHealth:F0}");
             }
         }
