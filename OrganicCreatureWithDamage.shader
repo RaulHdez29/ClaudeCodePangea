@@ -72,19 +72,26 @@ Shader "Custom/OrganicCreatureWithDamage"
             fixed4 baseColor = tex2D(_MainTex, IN.uv_MainTex) * _Color;
 
             // ═══════════════════════════════════════════════════════════
-            // 2. TEXTURA DE DAÑO
+            // 2. TEXTURA DE DAÑO CON FONDO TRANSPARENTE
             // ═══════════════════════════════════════════════════════════
             fixed4 damageTexColor = tex2D(_DamageTex, IN.uv_DamageTex);
 
-            // Aplicar tinte rojo a la textura de daño
-            fixed4 damageTinted = damageTexColor * _DamageColor * _DamageIntensity;
+            // Calcular la intensidad de la textura de daño (luminosidad)
+            // Esto convierte el negro a 0 y los rasguños claros a valores altos
+            float damageMask = dot(damageTexColor.rgb, float3(0.299, 0.587, 0.114)); // Luminance
 
-            // Mezclar el color base con el daño según _DamageAmount
-            // _DamageAmount = 0 → solo color base (sin daño visible)
-            // _DamageAmount = 1 → máxima visibilidad del daño
-            fixed4 finalColor = lerp(baseColor, damageTinted, _DamageAmount * damageTexColor.a);
+            // También considerar el canal alpha si está disponible
+            damageMask = max(damageMask, damageTexColor.a);
 
-            o.Albedo = finalColor.rgb;
+            // Aplicar el tinte rojo solo donde hay rasguños (damageMask > 0)
+            fixed3 damageColor = _DamageColor.rgb * _DamageIntensity;
+
+            // Mezclar el color base con los rasguños rojos
+            // Solo se aplica donde damageMask > 0 (rasguños), el fondo negro queda transparente
+            float damageStrength = damageMask * _DamageAmount;
+            fixed3 finalColor = lerp(baseColor.rgb, damageColor, damageStrength);
+
+            o.Albedo = finalColor;
 
             // ═══════════════════════════════════════════════════════════
             // 3. NORMAL MAP (opcional)
