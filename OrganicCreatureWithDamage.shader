@@ -77,19 +77,27 @@ Shader "Custom/OrganicCreatureWithDamage"
             fixed4 damageTexColor = tex2D(_DamageTex, IN.uv_DamageTex);
 
             // Calcular la intensidad de la textura de daño (luminosidad)
-            // Esto convierte el negro a 0 y los rasguños claros a valores altos
-            float damageMask = dot(damageTexColor.rgb, float3(0.299, 0.587, 0.114)); // Luminance
+            // Negro (0,0,0) = 0 → Sin daño visible (transparente)
+            // Blanco (1,1,1) = 1 → Rasguño máximo (tinte rojo completo)
+            float damageMask = dot(damageTexColor.rgb, float3(0.299, 0.587, 0.114));
 
-            // También considerar el canal alpha si está disponible
-            damageMask = max(damageMask, damageTexColor.a);
-
-            // Aplicar el tinte rojo solo donde hay rasguños (damageMask > 0)
+            // Aplicar el tinte rojo solo donde hay rasguños blancos
             fixed3 damageColor = _DamageColor.rgb * _DamageIntensity;
 
-            // Mezclar el color base con los rasguños rojos
-            // Solo se aplica donde damageMask > 0 (rasguños), el fondo negro queda transparente
+            // Calcular la fuerza del efecto de daño
+            // damageMask controla DÓNDE aparece (rasguños blancos de la textura)
+            // _DamageAmount controla la INTENSIDAD general (0-1 según vida)
             float damageStrength = damageMask * _DamageAmount;
-            fixed3 finalColor = lerp(baseColor.rgb, damageColor, damageStrength);
+
+            // BLEND MODE ESTILO THE ISLE: Additive/Screen para rasguños rojos SOBRE la textura
+            // Los rasguños se agregan como overlay rojo, no reemplazan el color base
+            // Screen blend: 1 - (1-A) * (1-B) - Ilumina sin saturar
+            fixed3 screenBlend = 1.0 - (1.0 - baseColor.rgb) * (1.0 - damageColor);
+
+            // Mezclar entre el color base y el screen blend según la fuerza del daño
+            // Donde no hay rasguños (damageMask=0) → baseColor
+            // Donde hay rasguños (damageMask>0) → screen blend con rojo
+            fixed3 finalColor = lerp(baseColor.rgb, screenBlend, damageStrength);
 
             o.Albedo = finalColor;
 
