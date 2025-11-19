@@ -127,6 +127,8 @@ public class HealthSystem : MonoBehaviourPunCallbacks
             }
 
             // 🩸 Inicializar sistema de daño visual en shader
+            // SIEMPRE inicializar para crear instancias únicas de materiales
+            // Esto evita que múltiples jugadores compartan el mismo material
             if (enableShaderDamage)
             {
                 InitializeShaderDamageSystem();
@@ -380,9 +382,22 @@ public class HealthSystem : MonoBehaviourPunCallbacks
         }
 
         // 🩸 Actualizar daño visual en shader
+        // SOLO el jugador local calcula y sincroniza el daño visual
         if (enableShaderDamage && shaderDamageInitialized)
         {
-            UpdateShaderDamage();
+            if (photonView != null && photonView.IsMine)
+            {
+                // Calcular el valor de daño visual localmente
+                float damageValue = CalculateDamageValue();
+
+                // Sincronizar a todos los clientes (incluyendo el local)
+                photonView.RPC("RPC_UpdateShaderDamage", RpcTarget.All, damageValue);
+            }
+            else if (photonView == null)
+            {
+                // Sin Photon (modo single player)
+                UpdateShaderDamageLocal(CalculateDamageValue());
+            }
         }
     }
     
@@ -568,7 +583,7 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 
 	/// <summary>
 	/// Inicializa el sistema de daño visual en los shaders
-	/// Crea materiales instanciados en runtime para cada renderer
+	/// Crea materiales instanciados en runtime para CADA jugador independientemente
 	/// </summary>
 	void InitializeShaderDamageSystem()
 	{
@@ -584,7 +599,8 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 		{
 			if (renderers[i] != null)
 			{
-				// Crear una instancia del material para no afectar otros objetos
+				// 🔥 CRÍTICO: Crear una instancia ÚNICA del material para este GameObject
+				// Esto evita que múltiples jugadores compartan el mismo material
 				Material instanceMaterial = new Material(renderers[i].sharedMaterial);
 				renderers[i].material = instanceMaterial;
 				runtimeMaterials[i] = instanceMaterial;
@@ -594,7 +610,9 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 				{
 					// Inicializar en 0 (sin daño visible)
 					instanceMaterial.SetFloat(shaderDamageParameter, 0f);
-					Debug.Log($"✅ Shader damage system inicializado en {renderers[i].name}");
+
+					string playerType = (photonView != null && photonView.IsMine) ? "LOCAL" : "REMOTO";
+					Debug.Log($"✅ Shader damage inicializado en {renderers[i].name} ({playerType})");
 				}
 				else
 				{
@@ -604,17 +622,16 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 		}
 
 		shaderDamageInitialized = true;
-		Debug.Log($"🩸 Sistema de daño visual en shader inicializado para {renderers.Length} renderers");
+		string ownerInfo = photonView != null ? (photonView.IsMine ? "JUGADOR LOCAL" : $"JUGADOR REMOTO (ViewID: {photonView.ViewID})") : "SINGLE PLAYER";
+		Debug.Log($"🩸 Sistema de daño visual en shader inicializado para {renderers.Length} renderers - {ownerInfo}");
 	}
 
 	/// <summary>
-	/// Actualiza el valor de daño visual en los shaders según el porcentaje de vida
+	/// Calcula el valor de daño visual según el porcentaje de vida
+	/// SOLO lo ejecuta el jugador local (photonView.IsMine)
 	/// </summary>
-	void UpdateShaderDamage()
+	float CalculateDamageValue()
 	{
-		if (runtimeMaterials == null || runtimeMaterials.Length == 0)
-			return;
-
 		// Calcular porcentaje de vida (0-100)
 		float healthPercentage = (currentHealth / maxHealth) * 100f;
 
@@ -637,7 +654,28 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 			damageValue = Mathf.Clamp01(damageValue);
 		}
 
-		// Aplicar el valor a todos los materiales
+		return damageValue;
+	}
+
+	/// <summary>
+	/// 🌐 RPC: Actualiza el shader de daño en TODOS los clientes (sincronizado)
+	/// </summary>
+	[PunRPC]
+	void RPC_UpdateShaderDamage(float damageValue)
+	{
+		UpdateShaderDamageLocal(damageValue);
+	}
+
+	/// <summary>
+	/// Actualiza el valor de daño visual en los shaders localmente
+	/// Ejecutado por todos los clientes para ver el mismo efecto
+	/// </summary>
+	void UpdateShaderDamageLocal(float damageValue)
+	{
+		if (runtimeMaterials == null || runtimeMaterials.Length == 0)
+			return;
+
+		// Aplicar el valor a todos los materiales de ESTE jugador específico
 		foreach (Material mat in runtimeMaterials)
 		{
 			if (mat != null && mat.HasProperty(shaderDamageParameter))
@@ -646,10 +684,12 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 			}
 		}
 
-		// Log ocasional para debug (cada 5% de cambio aproximadamente)
+		// Log ocasional para debug (solo cada 5% de cambio aproximadamente)
 		if (Mathf.Abs(damageValue * 100f - Mathf.Round(damageValue * 100f / 5f) * 5f) < 1f)
 		{
-			Debug.Log($"🩸 Daño visual actualizado: {damageValue:F2} (Vida: {healthPercentage:F1}%)");
+			string playerType = (photonView != null && photonView.IsMine) ? "LOCAL" : "REMOTO";
+			float healthPercentage = (currentHealth / maxHealth) * 100f;
+			Debug.Log($"🩸 Daño visual actualizado ({playerType}): {damageValue:F2} (Vida: {healthPercentage:F1}%)");
 		}
 	}
 
