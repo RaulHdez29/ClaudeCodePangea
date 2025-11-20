@@ -351,6 +351,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public float meatConsumptionInterval = 2f;
 	[Tooltip("Sonidos de comer para el cuerpo muerto")]
 	public AudioClip[] deadBodyEatingSounds;
+	[Tooltip("🗑️ Objetos hijos que se eliminarán del clon al morir (asignar desde el editor)")]
+	public GameObject[] childrenToRemoveOnClone;
 
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
@@ -3395,6 +3397,33 @@ void UpdateTimers()
 	}
 
 	/// <summary>
+	/// Busca un hijo por nombre de forma recursiva en el árbol de objetos
+	/// </summary>
+	Transform FindChildRecursive(Transform parent, string childName)
+	{
+		// Buscar en los hijos directos primero
+		foreach (Transform child in parent)
+		{
+			if (child.name == childName)
+			{
+				return child;
+			}
+		}
+
+		// Buscar recursivamente en los hijos de los hijos
+		foreach (Transform child in parent)
+		{
+			Transform found = FindChildRecursive(child, childName);
+			if (found != null)
+			{
+				return found;
+			}
+		}
+
+		return null;
+	}
+
+	/// <summary>
 	/// Coroutine que espera el delay y luego clona el cuerpo muerto
 	/// Cada cliente crea su propia copia local
 	/// </summary>
@@ -3420,6 +3449,28 @@ void UpdateTimers()
 		// Clonar este GameObject completo
 		GameObject deadBodyClone = Instantiate(gameObject, position, rotation);
 		deadBodyClone.name = $"DeadBody_{bodyID}";
+
+		// 🗑️ Eliminar objetos hijos especificados del clon
+		if (childrenToRemoveOnClone != null && childrenToRemoveOnClone.Length > 0)
+		{
+			foreach (GameObject childToRemove in childrenToRemoveOnClone)
+			{
+				if (childToRemove != null)
+				{
+					// Buscar el hijo en el clon usando la ruta relativa
+					Transform childInClone = FindChildRecursive(deadBodyClone.transform, childToRemove.name);
+					if (childInClone != null)
+					{
+						Destroy(childInClone.gameObject);
+						Debug.Log($"🗑️ Objeto hijo '{childToRemove.name}' eliminado del clon");
+					}
+					else
+					{
+						Debug.LogWarning($"⚠️ No se encontró el objeto hijo '{childToRemove.name}' en el clon");
+					}
+				}
+			}
+		}
 
 		// Asignar tag "Food" al clon Y a TODOS sus hijos recursivamente
 		SetTagRecursively(deadBodyClone, "Food");
