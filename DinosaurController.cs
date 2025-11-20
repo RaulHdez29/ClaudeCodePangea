@@ -354,6 +354,23 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	[Tooltip("🗑️ Objetos hijos que se eliminarán del clon al morir (asignar desde el editor)")]
 	public GameObject[] childrenToRemoveOnClone;
 
+	// 🌐 Lista estática para trackear todos los cuerpos muertos activos en la escena
+	// Esto permite sincronizar cuerpos con nuevos jugadores que se unan
+	private static List<DeadBodyData> activeDeadBodies = new List<DeadBodyData>();
+
+	// Estructura para almacenar datos de cuerpos muertos
+	[System.Serializable]
+	public class DeadBodyData
+	{
+		public GameObject bodyObject;
+		public Vector3 position;
+		public Quaternion rotation;
+		public int bodyID;
+		public float meatAmount;
+		public float currentMeat;
+		public float timeAlive; // Tiempo que lleva vivo el cuerpo
+	}
+
     [Header("🔄 CONFIGURACIÓN DE TURN Y LOOK - BASADO EN CÁMARA")]
     [Tooltip("Activar poses estáticas de giro")]
     public bool enableStaticTurn = true;
@@ -739,6 +756,45 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 		}
     }
 
+	// 🌐 PHOTON CALLBACK: Se llama cuando un nuevo jugador entra a la sala
+	// Solo el MasterClient sincroniza los cuerpos muertos existentes con el nuevo jugador
+	public override void OnPlayerEnteredRoom(Player newPlayer)
+	{
+		base.OnPlayerEnteredRoom(newPlayer);
+
+		// Solo ejecutar si este es nuestro jugador local Y somos el MasterClient
+		// Esto evita que se ejecute múltiples veces (una por cada dinosaurio en la escena)
+		if (!photonView.IsMine || !PhotonNetwork.IsMasterClient)
+			return;
+
+		Debug.Log($"🌐 Nuevo jugador {newPlayer.NickName} entró. Sincronizando {activeDeadBodies.Count} cuerpos muertos...");
+
+		// Limpiar cuerpos nulos antes de sincronizar
+		activeDeadBodies.RemoveAll(body => body.bodyObject == null);
+
+		// Enviar información de cada cuerpo muerto al nuevo jugador
+		foreach (DeadBodyData bodyData in activeDeadBodies)
+		{
+			// Verificar que el cuerpo aún existe
+			if (bodyData.bodyObject != null)
+			{
+				DeadBody deadBody = bodyData.bodyObject.GetComponent<DeadBody>();
+				if (deadBody != null)
+				{
+					// Enviar RPC solo al nuevo jugador con los datos actualizados
+					photonView.RPC("RPC_CreateDeadBodyOnClient", newPlayer,
+						bodyData.position,
+						bodyData.rotation,
+						bodyData.bodyID,
+						deadBody.currentMeat, // Usar la carne actual, no la inicial
+						deadBody.GetTimeAlive()); // Tiempo de vida actual
+
+					Debug.Log($"🌐 Sincronizado cuerpo {bodyData.bodyID} con nuevo jugador. Carne: {deadBody.currentMeat}");
+				}
+			}
+		}
+	}
+
     // 📏 SISTEMA DE CONFIGURACIÓN AUTOMÁTICA POR TAMAÑO
     [ContextMenu("Apply Size Preset")]
     public void ApplySizePreset()
@@ -877,6 +933,24 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 
     void Update()
     {
+		// 🌐 SISTEMA DE LIMPIEZA DE CUERPOS MUERTOS (solo MasterClient local)
+		// Limpia cuerpos destruidos de la lista cada cierto tiempo
+		if (photonView.IsMine && PhotonNetwork.IsMasterClient)
+		{
+			// Limpiar cada 5 segundos para no hacer esto cada frame
+			if (Time.frameCount % 300 == 0) // 300 frames ≈ 5 segundos a 60 FPS
+			{
+				int initialCount = activeDeadBodies.Count;
+				activeDeadBodies.RemoveAll(body => body.bodyObject == null);
+				int removedCount = initialCount - activeDeadBodies.Count;
+
+				if (removedCount > 0)
+				{
+					Debug.Log($"🗑️ Limpiados {removedCount} cuerpos muertos destruidos de la lista. Restantes: {activeDeadBodies.Count}");
+				}
+			}
+		}
+
         // 🌐 Jugadores remotos: interpolar posición y rotación
         if (!photonView.IsMine)
         {
@@ -3362,16 +3436,27 @@ void UpdateTimers()
 			controller.enabled = false;
 		}
 
-		// 💀 NUEVO: Crear el cuerpo muerto directamente (ya estamos en un RPC, no necesitamos otro)
+		// 💀 NUEVO: Solo el MasterClient crea el cuerpo muerto y notifica a los demás
 		if (enableDeadBodySystem)
 		{
-			// Llamar directamente a la coroutine sin otro RPC
-			StartCoroutine(SpawnDeadBodyAfterDelay(
-				transform.position,
-				transform.rotation,
-				photonView.ViewID,
-				deadBodySpawnDelay,
-				deadBodyMeatAmount));
+			if (PhotonNetwork.IsMasterClient)
+			{
+				// El MasterClient crea el cuerpo muerto
+				StartCoroutine(SpawnDeadBodyAfterDelay(
+					transform.position,
+					transform.rotation,
+					photonView.ViewID,
+					deadBodySpawnDelay,
+					deadBodyMeatAmount,
+					true)); // true = soy el master, debo notificar a otros
+
+				Debug.Log("🌐 MasterClient creando cuerpo muerto y notificando a otros clientes");
+			}
+			else
+			{
+				// Los demás clientes esperan la notificación del MasterClient
+				Debug.Log("🌐 Cliente esperando notificación del MasterClient para crear cuerpo");
+			}
 		}
 
 		// Desactivar este script
@@ -3425,9 +3510,9 @@ void UpdateTimers()
 
 	/// <summary>
 	/// Coroutine que espera el delay y luego clona el cuerpo muerto
-	/// Cada cliente crea su propia copia local
+	/// Solo el MasterClient crea el cuerpo y notifica a los demás
 	/// </summary>
-	System.Collections.IEnumerator SpawnDeadBodyAfterDelay(Vector3 position, Quaternion rotation, int bodyID, float delay, float meatAmount)
+	System.Collections.IEnumerator SpawnDeadBodyAfterDelay(Vector3 position, Quaternion rotation, int bodyID, float delay, float meatAmount, bool notifyOtherClients = false)
 	{
 		Debug.Log($"⏱️ Esperando {delay} segundos antes de spawmear cuerpo...");
 
@@ -3543,7 +3628,194 @@ void UpdateTimers()
 		capsule.height = 3f;
 		Debug.Log("✅ CapsuleCollider trigger agregado al cuerpo muerto para detección de comida");
 
+		// 🌐 REGISTRAR CUERPO MUERTO EN LA LISTA ACTIVA
+		DeadBodyData bodyData = new DeadBodyData
+		{
+			bodyObject = deadBodyClone,
+			position = position,
+			rotation = rotation,
+			bodyID = bodyID,
+			meatAmount = meatAmount,
+			currentMeat = meatAmount,
+			timeAlive = 0f
+		};
+		activeDeadBodies.Add(bodyData);
+		Debug.Log($"📋 Cuerpo muerto registrado en lista activa. Total: {activeDeadBodies.Count}");
+
+		// 🌐 Si soy el MasterClient, notificar a los demás clientes para crear el cuerpo
+		if (notifyOtherClients && PhotonNetwork.IsMasterClient)
+		{
+			photonView.RPC("RPC_CreateDeadBodyOnClient", RpcTarget.Others,
+				position, rotation, bodyID, meatAmount, 0f);
+			Debug.Log($"🌐 MasterClient notificó a otros clientes sobre el cuerpo {bodyID}");
+		}
+
 		Debug.Log($"✅ Cuerpo muerto clonado con {meatAmount} de carne. ID: {bodyID}");
+	}
+
+	/// <summary>
+	/// RPC para que los clientes creen un cuerpo muerto cuando el MasterClient se los notifica
+	/// </summary>
+	[PunRPC]
+	void RPC_CreateDeadBodyOnClient(Vector3 position, Quaternion rotation, int bodyID, float meatAmount, float timeAlive)
+	{
+		Debug.Log($"🌐 Cliente recibió notificación para crear cuerpo {bodyID}");
+
+		// Verificar si ya existe un cuerpo con este ID (evitar duplicados)
+		GameObject existingBody = GameObject.Find($"DeadBody_{bodyID}");
+		if (existingBody != null)
+		{
+			Debug.LogWarning($"⚠️ Cuerpo muerto {bodyID} ya existe, no se creará duplicado");
+			return;
+		}
+
+		// Crear el cuerpo muerto localmente (sin notificar a otros porque ya estamos siendo notificados)
+		StartCoroutine(CreateDeadBodyImmediate(position, rotation, bodyID, meatAmount, timeAlive));
+	}
+
+	/// <summary>
+	/// Crea un cuerpo muerto inmediatamente (sin delay) para clientes remotos
+	/// Similar a SpawnDeadBodyAfterDelay pero sin espera y sin notificación
+	/// </summary>
+	System.Collections.IEnumerator CreateDeadBodyImmediate(Vector3 position, Quaternion rotation, int bodyID, float meatAmount, float timeAlive)
+	{
+		// Esperar un frame para asegurar que todo esté inicializado
+		yield return null;
+
+		Debug.Log($"💀 Creando cuerpo muerto {bodyID} en cliente remoto...");
+
+		// Buscar el dinosaurio original por su ViewID
+		PhotonView originalPhotonView = PhotonView.Find(bodyID);
+		GameObject sourceObject = null;
+		SimpleDinosaurController originalController = null;
+
+		if (originalPhotonView != null)
+		{
+			sourceObject = originalPhotonView.gameObject;
+			originalController = sourceObject.GetComponent<SimpleDinosaurController>();
+
+			// Si el dinosaurio está muerto, forzar la animación de muerte y esperar a que se complete
+			if (originalController != null && originalController.isDead)
+			{
+				Animator sourceAnimator = sourceObject.GetComponent<Animator>();
+				if (sourceAnimator != null && sourceAnimator.enabled)
+				{
+					// Asegurar que esté en el estado de muerte
+					sourceAnimator.SetBool("IsDead", true);
+					sourceAnimator.SetTrigger("Death");
+
+					// Esperar a que la animación de muerte progrese
+					// Esto es más corto que el delay normal porque la animación ya comenzó
+					yield return new WaitForSeconds(1.0f);
+
+					Debug.Log($"⏱️ Animación de muerte aplicada al dinosaurio {bodyID}");
+				}
+			}
+
+			Debug.Log($"✅ Usando dinosaurio original con ViewID {bodyID}");
+		}
+		else
+		{
+			// Fallback: usar este GameObject como plantilla
+			Debug.LogWarning($"⚠️ No se encontró dinosaurio con ViewID {bodyID}, usando dinosaurio actual como plantilla");
+			sourceObject = gameObject;
+			originalController = this;
+		}
+
+		// Clonar el GameObject (ya sea el cuerpo muerto o el dinosaurio)
+		GameObject deadBodyClone = Instantiate(sourceObject, position, rotation);
+		deadBodyClone.name = $"DeadBody_{bodyID}";
+
+		// 🗑️ Eliminar objetos hijos especificados del clon
+		if (originalController != null && originalController.childrenToRemoveOnClone != null && originalController.childrenToRemoveOnClone.Length > 0)
+		{
+			foreach (GameObject childToRemove in originalController.childrenToRemoveOnClone)
+			{
+				if (childToRemove != null)
+				{
+					Transform childInClone = FindChildRecursive(deadBodyClone.transform, childToRemove.name);
+					if (childInClone != null)
+					{
+						Destroy(childInClone.gameObject);
+					}
+				}
+			}
+		}
+
+		// Asignar tag "Food" recursivamente
+		SetTagRecursively(deadBodyClone, "Food");
+
+		// Destruir el Animator para mantener la pose actual
+		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
+		if (cloneAnimator != null)
+		{
+			Destroy(cloneAnimator);
+		}
+
+		// Desactivar cámaras del clon
+		Camera[] cloneCameras = deadBodyClone.GetComponentsInChildren<Camera>();
+		foreach (Camera cam in cloneCameras)
+		{
+			cam.enabled = false;
+		}
+
+		// Eliminar scripts principales del objeto raíz
+		Destroy(deadBodyClone.GetComponent<SimpleDinosaurController>());
+		Destroy(deadBodyClone.GetComponent<CharacterController>());
+		Destroy(deadBodyClone.GetComponent<PhotonView>());
+		Destroy(deadBodyClone.GetComponent<PhotonTransformView>());
+		Destroy(deadBodyClone.GetComponent<PhotonAnimatorView>());
+		Destroy(deadBodyClone.GetComponent<LocalObjectsManager>());
+
+		// Eliminar sistemas opcionales
+		HealthSystem healthSystem = deadBodyClone.GetComponent<HealthSystem>();
+		if (healthSystem != null) Destroy(healthSystem);
+
+		DinosaurSleepSystem sleepSystem = deadBodyClone.GetComponent<DinosaurSleepSystem>();
+		if (sleepSystem != null) Destroy(sleepSystem);
+
+		// Eliminar colliders del objeto raíz
+		Collider[] rootColliders = deadBodyClone.GetComponents<Collider>();
+		foreach (Collider collider in rootColliders)
+		{
+			Destroy(collider);
+		}
+
+		// Asegurar que los renderers estén activos
+		Renderer[] cloneRenderers = deadBodyClone.GetComponentsInChildren<Renderer>();
+		foreach (Renderer rend in cloneRenderers)
+		{
+			rend.enabled = true;
+		}
+
+		// Agregar el script DeadBody
+		DeadBody deadBody = deadBodyClone.AddComponent<DeadBody>();
+		deadBody.meatAmount = meatAmount;
+		deadBody.currentMeat = meatAmount;
+		deadBody.bodyID = bodyID.ToString();
+		deadBody.eatingSounds = originalController != null ? originalController.deadBodyEatingSounds : null;
+		deadBody.SetTimeAlive(timeAlive); // Sincronizar el tiempo de vida
+
+		// Agregar CapsuleCollider trigger
+		CapsuleCollider capsule = deadBodyClone.AddComponent<CapsuleCollider>();
+		capsule.isTrigger = true;
+		capsule.radius = 1.5f;
+		capsule.height = 3f;
+
+		// Registrar en la lista activa
+		DeadBodyData bodyData = new DeadBodyData
+		{
+			bodyObject = deadBodyClone,
+			position = position,
+			rotation = rotation,
+			bodyID = bodyID,
+			meatAmount = meatAmount,
+			currentMeat = meatAmount,
+			timeAlive = timeAlive
+		};
+		activeDeadBodies.Add(bodyData);
+
+		Debug.Log($"✅ Cuerpo muerto {bodyID} creado en cliente remoto");
 	}
 
 	/// <summary>
