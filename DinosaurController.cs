@@ -3660,6 +3660,15 @@ void UpdateTimers()
 	void RPC_CreateDeadBodyOnClient(Vector3 position, Quaternion rotation, int bodyID, float meatAmount, float timeAlive)
 	{
 		Debug.Log($"🌐 Cliente recibió notificación para crear cuerpo {bodyID}");
+
+		// Verificar si ya existe un cuerpo con este ID (evitar duplicados)
+		GameObject existingBody = GameObject.Find($"DeadBody_{bodyID}");
+		if (existingBody != null)
+		{
+			Debug.LogWarning($"⚠️ Cuerpo muerto {bodyID} ya existe, no se creará duplicado");
+			return;
+		}
+
 		// Crear el cuerpo muerto localmente (sin notificar a otros porque ya estamos siendo notificados)
 		StartCoroutine(CreateDeadBodyImmediate(position, rotation, bodyID, meatAmount, timeAlive));
 	}
@@ -3675,28 +3684,47 @@ void UpdateTimers()
 
 		Debug.Log($"💀 Creando cuerpo muerto {bodyID} en cliente remoto...");
 
-		// Buscar el dinosaurio original por su ViewID para clonarlo
+		// Buscar el dinosaurio original por su ViewID
 		PhotonView originalPhotonView = PhotonView.Find(bodyID);
-		GameObject originalDinosaur = null;
+		GameObject sourceObject = null;
+		SimpleDinosaurController originalController = null;
 
 		if (originalPhotonView != null)
 		{
-			originalDinosaur = originalPhotonView.gameObject;
-			Debug.Log($"✅ Encontrado dinosaurio original con ViewID {bodyID}");
+			sourceObject = originalPhotonView.gameObject;
+			originalController = sourceObject.GetComponent<SimpleDinosaurController>();
+
+			// Si el dinosaurio está muerto, forzar la animación de muerte y esperar a que se complete
+			if (originalController != null && originalController.isDead)
+			{
+				Animator sourceAnimator = sourceObject.GetComponent<Animator>();
+				if (sourceAnimator != null && sourceAnimator.enabled)
+				{
+					// Asegurar que esté en el estado de muerte
+					sourceAnimator.SetBool("IsDead", true);
+					sourceAnimator.SetTrigger("Death");
+
+					// Esperar a que la animación de muerte progrese
+					// Esto es más corto que el delay normal porque la animación ya comenzó
+					yield return new WaitForSeconds(1.0f);
+
+					Debug.Log($"⏱️ Animación de muerte aplicada al dinosaurio {bodyID}");
+				}
+			}
+
+			Debug.Log($"✅ Usando dinosaurio original con ViewID {bodyID}");
 		}
 		else
 		{
-			// Si no se encuentra, usar este GameObject como fallback
+			// Fallback: usar este GameObject como plantilla
 			Debug.LogWarning($"⚠️ No se encontró dinosaurio con ViewID {bodyID}, usando dinosaurio actual como plantilla");
-			originalDinosaur = gameObject;
+			sourceObject = gameObject;
+			originalController = this;
 		}
 
-		// Clonar el GameObject del dinosaurio
-		GameObject deadBodyClone = Instantiate(originalDinosaur, position, rotation);
+		// Clonar el GameObject (ya sea el cuerpo muerto o el dinosaurio)
+		GameObject deadBodyClone = Instantiate(sourceObject, position, rotation);
 		deadBodyClone.name = $"DeadBody_{bodyID}";
-
-		// Obtener el controller del dinosaurio original para acceder a su configuración
-		SimpleDinosaurController originalController = originalDinosaur.GetComponent<SimpleDinosaurController>();
 
 		// 🗑️ Eliminar objetos hijos especificados del clon
 		if (originalController != null && originalController.childrenToRemoveOnClone != null && originalController.childrenToRemoveOnClone.Length > 0)
@@ -3717,61 +3745,11 @@ void UpdateTimers()
 		// Asignar tag "Food" recursivamente
 		SetTagRecursively(deadBodyClone, "Food");
 
-		// 🎭 FORZAR POSE DE MUERTE ANTES DE DESTRUIR EL ANIMATOR
-		// Esto hace que el clon vaya al último frame de la animación sin ejecutarla
+		// Destruir el Animator para mantener la pose actual
 		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
 		if (cloneAnimator != null)
 		{
-			// Configurar parámetros de muerte
-			cloneAnimator.SetBool("IsDead", true);
-			cloneAnimator.SetTrigger("Death");
-
-			// Desactivar otros parámetros
-			cloneAnimator.SetBool("IsEating", false);
-			cloneAnimator.SetBool("IsDrinking", false);
-			cloneAnimator.SetBool("IsAttacking", false);
-			cloneAnimator.SetBool("IsRunning", false);
-			cloneAnimator.SetFloat("Speed", 0f);
-			cloneAnimator.SetFloat("MoveX", 0f);
-			cloneAnimator.SetFloat("MoveZ", 0f);
-
-			// Forzar actualización inmediata del Animator
-			cloneAnimator.Update(0f);
-
-			// 🎯 IR DIRECTAMENTE AL FINAL DE LA ANIMACIÓN DE MUERTE
-			// Buscar el estado de muerte en el Animator
-			AnimatorControllerParameter[] parameters = cloneAnimator.parameters;
-
-			// Intentar reproducir la animación de muerte al 100% (último frame)
-			// Esto varía según el nombre de la animación en el Animator Controller
-			try
-			{
-				// Intenta ir al estado de muerte normalizado al final
-				cloneAnimator.Play("Death", 0, 1.0f); // Layer 0, tiempo normalizado 1.0 (final)
-				cloneAnimator.Update(0f); // Forzar actualización inmediata
-				Debug.Log("🎭 Animator forzado al último frame de la animación de muerte");
-			}
-			catch
-			{
-				// Si falla, intentar con nombres alternativos comunes
-				try
-				{
-					cloneAnimator.Play("Die", 0, 1.0f);
-					cloneAnimator.Update(0f);
-					Debug.Log("🎭 Animator forzado al último frame (Die)");
-				}
-				catch
-				{
-					Debug.LogWarning("⚠️ No se pudo forzar el estado de muerte, usando pose por defecto");
-				}
-			}
-
-			// Esperar un frame para que Unity aplique los cambios de pose
-			yield return null;
-
-			// Ahora destruir el Animator para fijar la pose permanentemente
 			Destroy(cloneAnimator);
-			Debug.Log("🎭 Animator destruido, pose de muerte fijada");
 		}
 
 		// Desactivar cámaras del clon
