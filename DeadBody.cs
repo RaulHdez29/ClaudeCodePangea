@@ -28,6 +28,9 @@ public class DeadBody : MonoBehaviour
     private float despawnTimer = 0f;
     private AudioSource audioSource;
 
+    // 🌐 Para sincronización con nuevos jugadores
+    private float timeAlive = 0f;
+
     void Start()
     {
         // Inicializar cantidad de carne
@@ -49,6 +52,7 @@ public class DeadBody : MonoBehaviour
     void Update()
     {
         despawnTimer += Time.deltaTime;
+        timeAlive += Time.deltaTime; // Trackear tiempo de vida total
 
         // Verificar si se agotó el tiempo o la carne
         if (despawnTimer >= despawnTime || currentMeat <= 0f)
@@ -116,5 +120,23 @@ public class DeadBody : MonoBehaviour
     public void SetMeat(float amount)
     {
         currentMeat = amount;
+    }
+
+    /// <summary>
+    /// Obtiene el tiempo que lleva vivo el cuerpo (para sincronización)
+    /// </summary>
+    public float GetTimeAlive()
+    {
+        return timeAlive;
+    }
+
+    /// <summary>
+    /// Establece el tiempo de vida del cuerpo (para sincronización con nuevos clientes)
+    /// </summary>
+    public void SetTimeAlive(float time)
+    {
+        timeAlive = time;
+        despawnTimer = time; // También actualizar el timer de despawn para mantener sincronizado
+        Debug.Log($"⏱️ Tiempo de vida del cuerpo {bodyID} actualizado a {time} segundos");
     }
 }
