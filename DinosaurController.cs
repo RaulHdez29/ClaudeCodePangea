@@ -3717,11 +3717,61 @@ void UpdateTimers()
 		// Asignar tag "Food" recursivamente
 		SetTagRecursively(deadBodyClone, "Food");
 
-		// Destruir el Animator para mantener la pose actual
+		// 🎭 FORZAR POSE DE MUERTE ANTES DE DESTRUIR EL ANIMATOR
+		// Esto hace que el clon vaya al último frame de la animación sin ejecutarla
 		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
 		if (cloneAnimator != null)
 		{
+			// Configurar parámetros de muerte
+			cloneAnimator.SetBool("IsDead", true);
+			cloneAnimator.SetTrigger("Death");
+
+			// Desactivar otros parámetros
+			cloneAnimator.SetBool("IsEating", false);
+			cloneAnimator.SetBool("IsDrinking", false);
+			cloneAnimator.SetBool("IsAttacking", false);
+			cloneAnimator.SetBool("IsRunning", false);
+			cloneAnimator.SetFloat("Speed", 0f);
+			cloneAnimator.SetFloat("MoveX", 0f);
+			cloneAnimator.SetFloat("MoveZ", 0f);
+
+			// Forzar actualización inmediata del Animator
+			cloneAnimator.Update(0f);
+
+			// 🎯 IR DIRECTAMENTE AL FINAL DE LA ANIMACIÓN DE MUERTE
+			// Buscar el estado de muerte en el Animator
+			AnimatorControllerParameter[] parameters = cloneAnimator.parameters;
+
+			// Intentar reproducir la animación de muerte al 100% (último frame)
+			// Esto varía según el nombre de la animación en el Animator Controller
+			try
+			{
+				// Intenta ir al estado de muerte normalizado al final
+				cloneAnimator.Play("Death", 0, 1.0f); // Layer 0, tiempo normalizado 1.0 (final)
+				cloneAnimator.Update(0f); // Forzar actualización inmediata
+				Debug.Log("🎭 Animator forzado al último frame de la animación de muerte");
+			}
+			catch
+			{
+				// Si falla, intentar con nombres alternativos comunes
+				try
+				{
+					cloneAnimator.Play("Die", 0, 1.0f);
+					cloneAnimator.Update(0f);
+					Debug.Log("🎭 Animator forzado al último frame (Die)");
+				}
+				catch
+				{
+					Debug.LogWarning("⚠️ No se pudo forzar el estado de muerte, usando pose por defecto");
+				}
+			}
+
+			// Esperar un frame para que Unity aplique los cambios de pose
+			yield return null;
+
+			// Ahora destruir el Animator para fijar la pose permanentemente
 			Destroy(cloneAnimator);
+			Debug.Log("🎭 Animator destruido, pose de muerte fijada");
 		}
 
 		// Desactivar cámaras del clon
