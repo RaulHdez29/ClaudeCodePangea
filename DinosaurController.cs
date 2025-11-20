@@ -353,6 +353,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 	public AudioClip[] deadBodyEatingSounds;
 	[Tooltip("🗑️ Objetos hijos que se eliminarán del clon al morir (asignar desde el editor)")]
 	public GameObject[] childrenToRemoveOnClone;
+	[Tooltip("🎭 AnimatorController con solo la animación de muerte (para nuevos clientes)")]
+	public RuntimeAnimatorController deathAnimatorController;
 
 	// 🌐 Lista estática para trackear todos los cuerpos muertos activos en la escena
 	// Esto permite sincronizar cuerpos con nuevos jugadores que se unan
@@ -3745,11 +3747,27 @@ void UpdateTimers()
 		// Asignar tag "Food" recursivamente
 		SetTagRecursively(deadBodyClone, "Food");
 
-		// Destruir el Animator para mantener la pose actual
+		// 🎭 IMPORTANTE: Para nuevos clientes, asignar el Animator de muerte
+		// Esto permite que vean el último frame de la animación de muerte
 		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
 		if (cloneAnimator != null)
 		{
-			Destroy(cloneAnimator);
+			// Si hay un controller de muerte configurado y un controller original lo tiene
+			if (originalController != null && originalController.deathAnimatorController != null)
+			{
+				// Asignar el controller de muerte que solo tiene la animación de muerte
+				cloneAnimator.runtimeAnimatorController = originalController.deathAnimatorController;
+
+				// Iniciar corrutina para reproducir la animación y fijar el último frame
+				StartCoroutine(PlayDeathAnimationAndFreeze(cloneAnimator));
+				Debug.Log("🎭 Animator de muerte asignado para nuevo cliente");
+			}
+			else
+			{
+				// Fallback: destruir el Animator (comportamiento anterior)
+				Destroy(cloneAnimator);
+				Debug.Log("🎭 Animator destruido (no hay controller de muerte configurado)");
+			}
 		}
 
 		// Desactivar cámaras del clon
@@ -3837,6 +3855,39 @@ void UpdateTimers()
 				break;
 			}
 		}
+	}
+
+	/// <summary>
+	/// Corrutina para reproducir la animación de muerte y fijar el último frame
+	/// Solo se usa para nuevos clientes que se conectan después de que el dinosaurio murió
+	/// </summary>
+	System.Collections.IEnumerator PlayDeathAnimationAndFreeze(Animator animator)
+	{
+		if (animator == null) yield break;
+
+		// Esperar un frame para que el Animator se inicialice
+		yield return null;
+
+		// Reproducir la animación de muerte
+		// Asumimos que el controller de muerte tiene una animación en el estado base
+		animator.Play(0, 0, 0f); // Layer 0, estado 0, desde el principio
+
+		Debug.Log("🎭 Reproduciendo animación de muerte para nuevo cliente...");
+
+		// Esperar a que la animación termine
+		// Obtener información del estado actual
+		AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(0);
+		float animationLength = stateInfo.length;
+
+		// Esperar la duración de la animación
+		yield return new WaitForSeconds(animationLength);
+
+		// Esperar un frame adicional para asegurar que terminó
+		yield return null;
+
+		// Destruir el Animator para fijar el último frame
+		Destroy(animator);
+		Debug.Log("🎭 Animación de muerte terminada, último frame fijado");
 	}
 
 	// 🌐 PHOTON: Sincronización OPTIMIZADA de datos personalizados
