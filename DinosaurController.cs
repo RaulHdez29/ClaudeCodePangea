@@ -437,6 +437,18 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Header("🎬 SISTEMA DE ENTRY/EXIT ANIMATIONS")]
     [Tooltip("Habilitar animaciones de entrada/salida (walk ent, walk stop, run ent, run stop)")]
     public bool enableEntryExitAnimations = true;
+
+    [Header("🎬 Animaciones Disponibles (Activar solo si tu modelo las tiene)")]
+    [Tooltip("✅ El modelo tiene animación Walk Ent (inicio de caminar)")]
+    public bool hasWalkEntryAnimation = true;
+    [Tooltip("✅ El modelo tiene animación Walk Stop (detener caminar)")]
+    public bool hasWalkStopAnimation = true;
+    [Tooltip("✅ El modelo tiene animación Run Ent (inicio de correr)")]
+    public bool hasRunEntryAnimation = true;
+    [Tooltip("✅ El modelo tiene animación Run Stop (detener correr)")]
+    public bool hasRunStopAnimation = true;
+
+    [Header("🎬 Configuración de Duraciones")]
     [Tooltip("Duración mínima de movimiento antes de permitir animación de stop (segundos)")]
     public float minMovementTimeBeforeStop = 0.1f;
     [Tooltip("Duración de la animación de entrada walk ent (segundos)")]
@@ -1678,6 +1690,15 @@ void ApplyMovement()
 //      Condiciones: IsRunning = false && IsStartingMovement = true
 //
 // 5. AJUSTES EN INSPECTOR:
+//    enableEntryExitAnimations: Habilitar/deshabilitar todo el sistema
+//
+//    🎬 Animaciones Disponibles (marcar solo las que tu modelo tiene):
+//    - hasWalkEntryAnimation: ✅ si tienes walk_ent
+//    - hasWalkStopAnimation: ✅ si tienes walk_stop
+//    - hasRunEntryAnimation: ✅ si tienes run_ent
+//    - hasRunStopAnimation: ✅ si tienes run_stop
+//
+//    🎬 Configuración de Duraciones:
 //    - walkEntryDuration: Duración de tu animación walk ent
 //    - walkStopDuration: Duración de tu animación walk stop
 //    - runEntryDuration: Duración de tu animación run ent
@@ -1690,6 +1711,8 @@ void ApplyMovement()
 //    - Las duraciones en el código deben coincidir con las duraciones reales de tus animaciones
 //    - Usa "Has Exit Time" solo en transiciones automáticas (Ent → Loop, Stop → Idle)
 //    - El sistema detecta automáticamente cambios entre walk y run durante el movimiento
+//    - Si un modelo NO tiene entry/exit animations, desmarca las variables correspondientes
+//    - El sistema saltará automáticamente al loop/idle si la animación no está disponible
 //    - Puedes deshabilitar el sistema completo con enableEntryExitAnimations = false
 // ============================================================================
 
@@ -1715,27 +1738,47 @@ void UpdateEntryExitAnimations()
     // 🎬 DETECCIÓN DE INICIO DE MOVIMIENTO (Entry)
     if (isMovingNow && !wasMoving && !isPlayingEntry && !isPlayingStop)
     {
-        // Comenzó a moverse
-        isStartingMovement = true;
-        isStoppingMovement = false;
-        isPlayingEntry = true;
-        isPlayingStop = false;
-        movementTimer = 0f;
+        // Verificar si el modelo tiene la animación de entry correspondiente
+        bool hasEntryAnim = isRunning ? hasRunEntryAnimation : hasWalkEntryAnimation;
 
-        // Determinar duración según si está corriendo o caminando
-        entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
-
-        if (showEntryExitDebugLogs)
+        if (hasEntryAnim)
         {
-            Debug.Log($"🎬 Entry Animation Started: {(isRunning ? "RUN" : "WALK")} ENT");
+            // Comenzó a moverse y tiene animación de entrada
+            isStartingMovement = true;
+            isStoppingMovement = false;
+            isPlayingEntry = true;
+            isPlayingStop = false;
+            movementTimer = 0f;
+
+            // Determinar duración según si está corriendo o caminando
+            entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log($"🎬 Entry Animation Started: {(isRunning ? "RUN" : "WALK")} ENT");
+            }
+        }
+        else
+        {
+            // No tiene animación de entrada, ir directo al loop
+            isStartingMovement = false;
+            isPlayingEntry = false;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log($"⚠️ {(isRunning ? "RUN" : "WALK")} ENT not available - skipping to loop");
+            }
         }
     }
 
     // 🎬 DETECCIÓN DE PARADA (Stop)
     else if (!isMovingNow && wasMoving && !isPlayingStop && !isPlayingEntry)
     {
+        // Verificar si el modelo tiene la animación de stop correspondiente
+        bool hasStopAnim = wasRunning ? hasRunStopAnimation : hasWalkStopAnimation;
+
         // Se detuvo, verificar que estuvo en movimiento el tiempo mínimo
-        if (movementTimer >= minMovementTimeBeforeStop)
+        if (movementTimer >= minMovementTimeBeforeStop && hasStopAnim)
         {
             isStoppingMovement = true;
             isStartingMovement = false;
@@ -1752,9 +1795,14 @@ void UpdateEntryExitAnimations()
         }
         else
         {
-            // No estuvo en movimiento suficiente tiempo, cancelar stop animation
+            // No tiene animación de stop o no estuvo en movimiento suficiente tiempo
             isStoppingMovement = false;
             isPlayingStop = false;
+
+            if (showEntryExitDebugLogs && !hasStopAnim)
+            {
+                Debug.Log($"⚠️ {(wasRunning ? "RUN" : "WALK")} STOP not available - direct to idle");
+            }
         }
     }
 
@@ -1805,13 +1853,29 @@ void UpdateEntryExitAnimations()
     // Si cambia entre walk y run mientras está en movimiento, reiniciar entry
     if (isMovingNow && wasMoving && isRunning != wasRunning && !isPlayingEntry)
     {
-        isStartingMovement = true;
-        isPlayingEntry = true;
-        entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
+        // Verificar si tiene la animación de entry para el nuevo modo de movimiento
+        bool hasTransitionEntryAnim = isRunning ? hasRunEntryAnimation : hasWalkEntryAnimation;
 
-        if (showEntryExitDebugLogs)
+        if (hasTransitionEntryAnim)
         {
-            Debug.Log($"🎬 Movement Type Changed: {(isRunning ? "WALK → RUN" : "RUN → WALK")} ENT");
+            isStartingMovement = true;
+            isPlayingEntry = true;
+            entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log($"🎬 Movement Type Changed: {(isRunning ? "WALK → RUN" : "RUN → WALK")} ENT");
+            }
+        }
+        else
+        {
+            // No tiene animación de transición, solo cambiar el loop
+            isStartingMovement = false;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log($"⚠️ {(isRunning ? "RUN" : "WALK")} ENT not available for transition - direct to loop");
+            }
         }
     }
 
