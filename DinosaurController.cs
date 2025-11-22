@@ -433,6 +433,24 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Tooltip("Suavizado de las animaciones de dirección (MoveX/MoveZ)")]
     [Range(0.05f, 0.5f)]
     public float directionAnimationDampTime = 0.1f;
+
+    [Header("🎬 SISTEMA DE ENTRY/EXIT ANIMATIONS")]
+    [Tooltip("Habilitar animaciones de entrada/salida (walk ent, walk stop, run ent, run stop)")]
+    public bool enableEntryExitAnimations = true;
+    [Tooltip("Duración mínima de movimiento antes de permitir animación de stop (segundos)")]
+    public float minMovementTimeBeforeStop = 0.1f;
+    [Tooltip("Duración de la animación de entrada walk ent (segundos)")]
+    public float walkEntryDuration = 0.5f;
+    [Tooltip("Duración de la animación de salida walk stop (segundos)")]
+    public float walkStopDuration = 0.5f;
+    [Tooltip("Duración de la animación de entrada run ent (segundos)")]
+    public float runEntryDuration = 0.5f;
+    [Tooltip("Duración de la animación de salida run stop (segundos)")]
+    public float runStopDuration = 0.5f;
+    [Tooltip("Velocidad mínima para considerar que está en movimiento")]
+    public float entryExitSpeedThreshold = 0.1f;
+    [Tooltip("Mostrar logs de debug para entry/exit animations")]
+    public bool showEntryExitDebugLogs = false;
     
     [Header("Audio")]
     public AudioClip[] walkSounds;
@@ -557,6 +575,16 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private float savedTurnBeforeVariation = 0f;  // Guardar Turn antes de variation
     private float savedLookBeforeVariation = 0f;  // Guardar Look antes de variation
     private bool isRestoringTurnLook = false;     // Flag para indicar que está restaurando
+
+    // 🎬 Variables de Entry/Exit Animations
+    private bool wasMoving = false;  // Estado anterior de movimiento
+    private bool isStartingMovement = false;  // Flag para animación de entrada
+    private bool isStoppingMovement = false;  // Flag para animación de salida
+    private float movementTimer = 0f;  // Tiempo en movimiento continuo
+    private float entryExitTimer = 0f;  // Timer para duraciones de entry/exit
+    private bool isPlayingEntry = false;  // Está reproduciendo animación de entrada
+    private bool isPlayingStop = false;  // Está reproduciendo animación de salida
+    private bool wasRunning = false;  // Estado anterior de running
 
     // 🌊 Variables de natación
     private Collider waterCollider = null;
@@ -1591,9 +1619,213 @@ void ApplyMovement()
         smoothNormal = Vector3.Lerp(smoothNormal, Vector3.up, Time.deltaTime * terrainAlignmentSpeed);
     }
 
+// 🎬 ============================================================================
+// SISTEMA DE ENTRY/EXIT ANIMATIONS
+// ============================================================================
+// Este sistema agrega animaciones de entrada y salida para walk y run,
+// similar a The Isle Evrima, para transiciones más naturales.
+//
+// 📋 CONFIGURACIÓN EN UNITY ANIMATOR:
+//
+// 1. PARÁMETROS DEL ANIMATOR (Bool):
+//    - IsStartingMovement (Bool) - Se activa al empezar a moverse
+//    - IsStoppingMovement (Bool) - Se activa al detenerse
+//    - IsRunning (Bool) - Ya existente, indica si está corriendo
+//
+// 2. ESTADOS Y TRANSICIONES PARA WALK:
+//    Idle → Walk Ent:
+//      Condiciones: IsStartingMovement = true && IsRunning = false
+//      Has Exit Time: false
+//
+//    Walk Ent → Walk Loop:
+//      Condiciones: None
+//      Has Exit Time: true (ajustar según duración de walk ent)
+//      Transition Duration: 0.1-0.2s
+//
+//    Walk Loop → Walk Stop:
+//      Condiciones: IsStoppingMovement = true
+//      Has Exit Time: false
+//
+//    Walk Stop → Idle:
+//      Condiciones: None
+//      Has Exit Time: true (ajustar según duración de walk stop)
+//      Transition Duration: 0.1-0.2s
+//
+// 3. ESTADOS Y TRANSICIONES PARA RUN:
+//    Idle → Run Ent:
+//      Condiciones: IsStartingMovement = true && IsRunning = true
+//      Has Exit Time: false
+//
+//    Run Ent → Run Loop:
+//      Condiciones: None
+//      Has Exit Time: true (ajustar según duración de run ent)
+//      Transition Duration: 0.1-0.2s
+//
+//    Run Loop → Run Stop:
+//      Condiciones: IsStoppingMovement = true
+//      Has Exit Time: false
+//
+//    Run Stop → Idle:
+//      Condiciones: None
+//      Has Exit Time: true (ajustar según duración de run stop)
+//      Transition Duration: 0.1-0.2s
+//
+// 4. TRANSICIÓN WALK ↔ RUN:
+//    Walk Loop → Run Ent:
+//      Condiciones: IsRunning = true && IsStartingMovement = true
+//
+//    Run Loop → Walk Ent:
+//      Condiciones: IsRunning = false && IsStartingMovement = true
+//
+// 5. AJUSTES EN INSPECTOR:
+//    - walkEntryDuration: Duración de tu animación walk ent
+//    - walkStopDuration: Duración de tu animación walk stop
+//    - runEntryDuration: Duración de tu animación run ent
+//    - runStopDuration: Duración de tu animación run stop
+//    - entryExitSpeedThreshold: Velocidad mínima para considerar movimiento (0.1 por defecto)
+//    - minMovementTimeBeforeStop: Tiempo mínimo moviéndose antes de permitir stop (0.1s)
+//    - showEntryExitDebugLogs: Activar para ver logs de debug en consola
+//
+// 💡 TIPS:
+//    - Las duraciones en el código deben coincidir con las duraciones reales de tus animaciones
+//    - Usa "Has Exit Time" solo en transiciones automáticas (Ent → Loop, Stop → Idle)
+//    - El sistema detecta automáticamente cambios entre walk y run durante el movimiento
+//    - Puedes deshabilitar el sistema completo con enableEntryExitAnimations = false
+// ============================================================================
+
+void UpdateEntryExitAnimations()
+{
+    if (!enableEntryExitAnimations)
+    {
+        // Si el sistema está deshabilitado, resetear todos los flags
+        isStartingMovement = false;
+        isStoppingMovement = false;
+        isPlayingEntry = false;
+        isPlayingStop = false;
+        wasMoving = false;
+        wasRunning = false;
+        movementTimer = 0f;
+        entryExitTimer = 0f;
+        return;
+    }
+
+    // Determinar si está en movimiento actualmente
+    bool isMovingNow = currentSpeed > entryExitSpeedThreshold && inputVector.magnitude > movementThreshold;
+
+    // 🎬 DETECCIÓN DE INICIO DE MOVIMIENTO (Entry)
+    if (isMovingNow && !wasMoving && !isPlayingEntry && !isPlayingStop)
+    {
+        // Comenzó a moverse
+        isStartingMovement = true;
+        isStoppingMovement = false;
+        isPlayingEntry = true;
+        isPlayingStop = false;
+        movementTimer = 0f;
+
+        // Determinar duración según si está corriendo o caminando
+        entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
+
+        if (showEntryExitDebugLogs)
+        {
+            Debug.Log($"🎬 Entry Animation Started: {(isRunning ? "RUN" : "WALK")} ENT");
+        }
+    }
+
+    // 🎬 DETECCIÓN DE PARADA (Stop)
+    else if (!isMovingNow && wasMoving && !isPlayingStop && !isPlayingEntry)
+    {
+        // Se detuvo, verificar que estuvo en movimiento el tiempo mínimo
+        if (movementTimer >= minMovementTimeBeforeStop)
+        {
+            isStoppingMovement = true;
+            isStartingMovement = false;
+            isPlayingStop = true;
+            isPlayingEntry = false;
+
+            // Determinar duración según si estaba corriendo o caminando
+            entryExitTimer = wasRunning ? runStopDuration : walkStopDuration;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log($"🎬 Stop Animation Started: {(wasRunning ? "RUN" : "WALK")} STOP");
+            }
+        }
+        else
+        {
+            // No estuvo en movimiento suficiente tiempo, cancelar stop animation
+            isStoppingMovement = false;
+            isPlayingStop = false;
+        }
+    }
+
+    // 🎬 GESTIÓN DE TIMERS Y TRANSICIONES
+    if (isPlayingEntry)
+    {
+        entryExitTimer -= Time.deltaTime;
+        if (entryExitTimer <= 0f)
+        {
+            // Terminó la animación de entrada, pasar al loop
+            isStartingMovement = false;
+            isPlayingEntry = false;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log($"🎬 Entry Animation Finished → Transitioning to {(isRunning ? "RUN" : "WALK")} LOOP");
+            }
+        }
+    }
+
+    if (isPlayingStop)
+    {
+        entryExitTimer -= Time.deltaTime;
+        if (entryExitTimer <= 0f)
+        {
+            // Terminó la animación de salida, volver a idle
+            isStoppingMovement = false;
+            isPlayingStop = false;
+
+            if (showEntryExitDebugLogs)
+            {
+                Debug.Log("🎬 Stop Animation Finished → Back to IDLE");
+            }
+        }
+    }
+
+    // 🎬 ACTUALIZAR TIMER DE MOVIMIENTO
+    if (isMovingNow)
+    {
+        movementTimer += Time.deltaTime;
+    }
+    else
+    {
+        movementTimer = 0f;
+    }
+
+    // 🎬 DETECCIÓN DE CAMBIO DE WALK A RUN O VICEVERSA
+    // Si cambia entre walk y run mientras está en movimiento, reiniciar entry
+    if (isMovingNow && wasMoving && isRunning != wasRunning && !isPlayingEntry)
+    {
+        isStartingMovement = true;
+        isPlayingEntry = true;
+        entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
+
+        if (showEntryExitDebugLogs)
+        {
+            Debug.Log($"🎬 Movement Type Changed: {(isRunning ? "WALK → RUN" : "RUN → WALK")} ENT");
+        }
+    }
+
+    // 🎬 GUARDAR ESTADOS PARA LA PRÓXIMA FRAME
+    wasMoving = isMovingNow;
+    wasRunning = isRunning;
+}
+
 void UpdateAnimations()
 {
     if (animator == null) return;
+
+    // 🎬 ACTUALIZAR SISTEMA DE ENTRY/EXIT ANIMATIONS
+    UpdateEntryExitAnimations();
 
     // 🌊 PARÁMETROS DE NATACIÓN
     animator.SetBool("IsInWater", isInWater);
@@ -1635,6 +1867,19 @@ void UpdateAnimations()
     animator.SetBool("IsCrouching", isCrouching && !isInWater);
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
+
+    // 🎬 PARÁMETROS DE ENTRY/EXIT ANIMATIONS
+    if (enableEntryExitAnimations)
+    {
+        animator.SetBool("IsStartingMovement", isStartingMovement);
+        animator.SetBool("IsStoppingMovement", isStoppingMovement);
+    }
+    else
+    {
+        // Asegurar que estén en false si el sistema está deshabilitado
+        animator.SetBool("IsStartingMovement", false);
+        animator.SetBool("IsStoppingMovement", false);
+    }
 
     // 🔹 3. Parámetros de dirección (si los usas en tu blend tree)
     // ✅ Usar dampTime para suavizar las transiciones
