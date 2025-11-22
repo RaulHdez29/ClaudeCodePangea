@@ -3698,29 +3698,27 @@ void UpdateTimers()
 		GameObject sourceObject = null;
 		SimpleDinosaurController originalController = null;
 
-		// 1️⃣ PRIORIDAD: Buscar dinosaurio vivo con el nombre del modelo
-		// Esto es más confiable que buscar por ViewID porque el dinosaurio original puede haber sido destruido
-		GameObject[] allDinosaurs = GameObject.FindGameObjectsWithTag("Player");
-		foreach (GameObject dino in allDinosaurs)
+		// 1️⃣ MÁXIMA PRIORIDAD: Buscar CUERPOS MUERTOS EXISTENTES del mismo modelo
+		// Esto es CRUCIAL porque el jugador original puede haber salido del servidor
+		// Los cuerpos muertos persisten y tienen el modelo correcto garantizado
+		foreach (DeadBodyData existingBody in activeDeadBodies)
 		{
-			// Comparar el nombre base (sin el sufijo de Photon como "(Clone)")
-			string dinoBaseName = dino.name.Replace("(Clone)", "").Trim();
-			string modelBaseName = modelName.Replace("(Clone)", "").Trim();
-
-			if (dinoBaseName == modelBaseName)
+			if (existingBody.bodyObject != null && existingBody.modelName == modelName)
 			{
-				SimpleDinosaurController controller = dino.GetComponent<SimpleDinosaurController>();
-				if (controller != null)
+				// Usar este cuerpo muerto como plantilla (tiene el modelo correcto)
+				sourceObject = existingBody.bodyObject;
+				Debug.Log($"✅ Encontrado cuerpo muerto existente del mismo modelo: {modelName}");
+
+				// Buscar el controller original si existe (para childrenToRemoveOnClone y deathAnimatorController)
+				if (existingBody.originalDinosaurPrefab != null)
 				{
-					sourceObject = dino;
-					originalController = controller;
-					Debug.Log($"✅ Encontrado dinosaurio por nombre: {dinoBaseName}");
-					break;
+					originalController = existingBody.originalDinosaurPrefab.GetComponent<SimpleDinosaurController>();
 				}
+				break;
 			}
 		}
 
-		// 2️⃣ FALLBACK: Buscar por ViewID
+		// 2️⃣ FALLBACK: Buscar dinosaurio original por ViewID
 		if (sourceObject == null)
 		{
 			PhotonView originalPhotonView = PhotonView.Find(bodyID);
@@ -3728,26 +3726,54 @@ void UpdateTimers()
 			{
 				sourceObject = originalPhotonView.gameObject;
 				originalController = sourceObject.GetComponent<SimpleDinosaurController>();
-				Debug.Log($"✅ Encontrado dinosaurio por ViewID: {bodyID}");
+				Debug.Log($"✅ Encontrado dinosaurio original por ViewID: {bodyID}");
 			}
 		}
 
-		// 3️⃣ ÚLTIMO FALLBACK: Usar cualquier dinosaurio del mismo tipo en la escena
+		// 3️⃣ FALLBACK: Buscar dinosaurio vivo con el mismo nombre de modelo
 		if (sourceObject == null)
 		{
-			Debug.LogWarning($"⚠️ No se encontró dinosaurio con nombre '{modelName}' o ViewID {bodyID}. Buscando cualquier dinosaurio en la escena...");
-			SimpleDinosaurController[] allControllers = FindObjectsOfType<SimpleDinosaurController>();
-			if (allControllers.Length > 0)
+			GameObject[] allDinosaurs = GameObject.FindGameObjectsWithTag("Player");
+			foreach (GameObject dino in allDinosaurs)
 			{
-				sourceObject = allControllers[0].gameObject;
-				originalController = allControllers[0];
-				Debug.LogWarning($"⚠️ Usando dinosaurio genérico: {sourceObject.name}");
+				// Comparar el nombre base (sin sufijos como "(Clone)")
+				string dinoBaseName = dino.name.Replace("(Clone)", "").Trim();
+				string modelBaseName = modelName.Replace("(Clone)", "").Trim();
+
+				if (dinoBaseName == modelBaseName)
+				{
+					SimpleDinosaurController controller = dino.GetComponent<SimpleDinosaurController>();
+					if (controller != null)
+					{
+						sourceObject = dino;
+						originalController = controller;
+						Debug.Log($"✅ Encontrado dinosaurio vivo por nombre: {dinoBaseName}");
+						break;
+					}
+				}
 			}
-			else
+		}
+
+		// 4️⃣ ÚLTIMO FALLBACK: Usar cualquier cuerpo muerto en la escena
+		if (sourceObject == null && activeDeadBodies.Count > 0)
+		{
+			DeadBodyData anyBody = activeDeadBodies[0];
+			if (anyBody.bodyObject != null)
 			{
-				Debug.LogError($"❌ ERROR: No hay ningún dinosaurio en la escena para clonar!");
-				yield break;
+				sourceObject = anyBody.bodyObject;
+				if (anyBody.originalDinosaurPrefab != null)
+				{
+					originalController = anyBody.originalDinosaurPrefab.GetComponent<SimpleDinosaurController>();
+				}
+				Debug.LogWarning($"⚠️ No se encontró modelo '{modelName}', usando cuerpo muerto genérico: {anyBody.modelName}");
 			}
+		}
+
+		// 5️⃣ ERROR: No hay ninguna fuente válida
+		if (sourceObject == null)
+		{
+			Debug.LogError($"❌ ERROR CRÍTICO: No se encontró ninguna fuente para crear cuerpo muerto. Modelo: {modelName}, ID: {bodyID}");
+			yield break;
 		}
 
 		// Clonar el GameObject (ya sea el cuerpo muerto o el dinosaurio)
@@ -3818,7 +3844,7 @@ void UpdateTimers()
 		DinosaurSleepSystem sleepSystem = deadBodyClone.GetComponent<DinosaurSleepSystem>();
 		if (sleepSystem != null) Destroy(sleepSystem);
 
-		// Eliminar colliders del objeto raíz
+		// Eliminar colliders del objeto raíz (excepto si es trigger para comida)
 		Collider[] rootColliders = deadBodyClone.GetComponents<Collider>();
 		foreach (Collider collider in rootColliders)
 		{
@@ -3832,7 +3858,16 @@ void UpdateTimers()
 			rend.enabled = true;
 		}
 
-		// Agregar el script DeadBody
+		// 🔄 Eliminar DeadBody existente si el source era un cuerpo muerto
+		// (Necesitamos crear uno nuevo con los valores correctos para este cuerpo)
+		DeadBody existingDeadBody = deadBodyClone.GetComponent<DeadBody>();
+		if (existingDeadBody != null)
+		{
+			Destroy(existingDeadBody);
+			Debug.Log("🗑️ DeadBody existente eliminado del clon (se creará uno nuevo)");
+		}
+
+		// Agregar el script DeadBody con los valores correctos para este cuerpo
 		DeadBody deadBody = deadBodyClone.AddComponent<DeadBody>();
 		deadBody.meatAmount = meatAmount;
 		deadBody.currentMeat = meatAmount;
