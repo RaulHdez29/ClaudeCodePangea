@@ -438,6 +438,18 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Tooltip("Habilitar animaciones de entrada/salida (walk ent, walk stop, run ent, run stop)")]
     public bool enableEntryExitAnimations = true;
 
+    [Header("🎬 Modo de Implementación")]
+    [Tooltip("BLEND TREE MODE: Entry/Exit dentro del Blend Tree usando MoveZ | SEPARATE STATES: Estados separados con IsStartingMovement/IsStoppingMovement")]
+    public bool useBlendTreeMode = false;
+    [Tooltip("Valor de MoveZ para animación Entry en Blend Tree (ej: 0.3)")]
+    public float blendTreeEntryValue = 0.3f;
+    [Tooltip("Valor de MoveZ para animación Loop en Blend Tree (ej: 1.0)")]
+    public float blendTreeLoopValue = 1.0f;
+    [Tooltip("Valor de MoveZ para animación Stop en Blend Tree (ej: -0.3)")]
+    public float blendTreeStopValue = -0.3f;
+    [Tooltip("Valor de MoveZ para Idle en Blend Tree (ej: 0.0)")]
+    public float blendTreeIdleValue = 0.0f;
+
     [Header("🎬 Animaciones Disponibles (Activar solo si tu modelo las tiene)")]
     [Tooltip("✅ El modelo tiene animación Walk Ent (inicio de caminar)")]
     public bool hasWalkEntryAnimation = true;
@@ -597,6 +609,11 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private bool isPlayingEntry = false;  // Está reproduciendo animación de entrada
     private bool isPlayingStop = false;  // Está reproduciendo animación de salida
     private bool wasRunning = false;  // Estado anterior de running
+
+    // 🎬 Variables para Blend Tree Mode
+    private bool overrideMoveZ = false;  // Si true, usar moveZOverride en lugar del valor calculado
+    private float moveZOverride = 0f;  // Valor override de MoveZ para entry/exit en blend tree
+    private float moveXOverride = 0f;  // Valor override de MoveX (mantener dirección lateral durante entry/stop)
 
     // 🌊 Variables de natación
     private Collider waterCollider = null;
@@ -1729,6 +1746,7 @@ void UpdateEntryExitAnimations()
         wasRunning = false;
         movementTimer = 0f;
         entryExitTimer = 0f;
+        overrideMoveZ = false;
         return;
     }
 
@@ -1744,8 +1762,6 @@ void UpdateEntryExitAnimations()
         if (hasEntryAnim)
         {
             // Comenzó a moverse y tiene animación de entrada
-            isStartingMovement = true;
-            isStoppingMovement = false;
             isPlayingEntry = true;
             isPlayingStop = false;
             movementTimer = 0f;
@@ -1753,9 +1769,28 @@ void UpdateEntryExitAnimations()
             // Determinar duración según si está corriendo o caminando
             entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
 
-            if (showEntryExitDebugLogs)
+            // 🎬 BLEND TREE MODE: Controlar MoveZ
+            if (useBlendTreeMode)
             {
-                Debug.Log($"🎬 Entry Animation Started: {(isRunning ? "RUN" : "WALK")} ENT");
+                overrideMoveZ = true;
+                moveZOverride = blendTreeEntryValue;  // 0.3 por defecto
+                moveXOverride = inputVector.x;  // Mantener dirección lateral
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [BLEND TREE] Entry Started: {(isRunning ? "RUN" : "WALK")} ENT (MoveZ={blendTreeEntryValue})");
+                }
+            }
+            // 🎬 SEPARATE STATES MODE: Controlar parámetros Bool
+            else
+            {
+                isStartingMovement = true;
+                isStoppingMovement = false;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [STATES] Entry Animation Started: {(isRunning ? "RUN" : "WALK")} ENT");
+                }
             }
         }
         else
@@ -1763,6 +1798,7 @@ void UpdateEntryExitAnimations()
             // No tiene animación de entrada, ir directo al loop
             isStartingMovement = false;
             isPlayingEntry = false;
+            overrideMoveZ = false;
 
             if (showEntryExitDebugLogs)
             {
@@ -1780,17 +1816,34 @@ void UpdateEntryExitAnimations()
         // Se detuvo, verificar que estuvo en movimiento el tiempo mínimo
         if (movementTimer >= minMovementTimeBeforeStop && hasStopAnim)
         {
-            isStoppingMovement = true;
-            isStartingMovement = false;
             isPlayingStop = true;
             isPlayingEntry = false;
 
             // Determinar duración según si estaba corriendo o caminando
             entryExitTimer = wasRunning ? runStopDuration : walkStopDuration;
 
-            if (showEntryExitDebugLogs)
+            // 🎬 BLEND TREE MODE: Controlar MoveZ
+            if (useBlendTreeMode)
             {
-                Debug.Log($"🎬 Stop Animation Started: {(wasRunning ? "RUN" : "WALK")} STOP");
+                overrideMoveZ = true;
+                moveZOverride = blendTreeStopValue;  // -0.3 por defecto
+                moveXOverride = 0f;  // Sin dirección lateral durante stop
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [BLEND TREE] Stop Started: {(wasRunning ? "RUN" : "WALK")} STOP (MoveZ={blendTreeStopValue})");
+                }
+            }
+            // 🎬 SEPARATE STATES MODE: Controlar parámetros Bool
+            else
+            {
+                isStoppingMovement = true;
+                isStartingMovement = false;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [STATES] Stop Animation Started: {(wasRunning ? "RUN" : "WALK")} STOP");
+                }
             }
         }
         else
@@ -1798,6 +1851,7 @@ void UpdateEntryExitAnimations()
             // No tiene animación de stop o no estuvo en movimiento suficiente tiempo
             isStoppingMovement = false;
             isPlayingStop = false;
+            overrideMoveZ = false;
 
             if (showEntryExitDebugLogs && !hasStopAnim)
             {
@@ -1813,12 +1867,26 @@ void UpdateEntryExitAnimations()
         if (entryExitTimer <= 0f)
         {
             // Terminó la animación de entrada, pasar al loop
-            isStartingMovement = false;
             isPlayingEntry = false;
 
-            if (showEntryExitDebugLogs)
+            if (useBlendTreeMode)
             {
-                Debug.Log($"🎬 Entry Animation Finished → Transitioning to {(isRunning ? "RUN" : "WALK")} LOOP");
+                // En Blend Tree Mode, dejar que MoveZ vuelva a controlarse normalmente
+                overrideMoveZ = false;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [BLEND TREE] Entry Finished → Loop (MoveZ free)");
+                }
+            }
+            else
+            {
+                isStartingMovement = false;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [STATES] Entry Animation Finished → Transitioning to {(isRunning ? "RUN" : "WALK")} LOOP");
+                }
             }
         }
     }
@@ -1829,12 +1897,28 @@ void UpdateEntryExitAnimations()
         if (entryExitTimer <= 0f)
         {
             // Terminó la animación de salida, volver a idle
-            isStoppingMovement = false;
             isPlayingStop = false;
 
-            if (showEntryExitDebugLogs)
+            if (useBlendTreeMode)
             {
-                Debug.Log("🎬 Stop Animation Finished → Back to IDLE");
+                // En Blend Tree Mode, setear MoveZ a idle value
+                moveZOverride = blendTreeIdleValue;  // 0.0 por defecto
+                // Después de un frame, desactivar override
+                overrideMoveZ = false;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [BLEND TREE] Stop Finished → IDLE (MoveZ={blendTreeIdleValue})");
+                }
+            }
+            else
+            {
+                isStoppingMovement = false;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log("🎬 [STATES] Stop Animation Finished → Back to IDLE");
+                }
             }
         }
     }
@@ -1858,19 +1942,35 @@ void UpdateEntryExitAnimations()
 
         if (hasTransitionEntryAnim)
         {
-            isStartingMovement = true;
             isPlayingEntry = true;
             entryExitTimer = isRunning ? runEntryDuration : walkEntryDuration;
 
-            if (showEntryExitDebugLogs)
+            if (useBlendTreeMode)
             {
-                Debug.Log($"🎬 Movement Type Changed: {(isRunning ? "WALK → RUN" : "RUN → WALK")} ENT");
+                overrideMoveZ = true;
+                moveZOverride = blendTreeEntryValue;
+                moveXOverride = inputVector.x;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [BLEND TREE] Type Changed: {(isRunning ? "WALK → RUN" : "RUN → WALK")} ENT");
+                }
+            }
+            else
+            {
+                isStartingMovement = true;
+
+                if (showEntryExitDebugLogs)
+                {
+                    Debug.Log($"🎬 [STATES] Movement Type Changed: {(isRunning ? "WALK → RUN" : "RUN → WALK")} ENT");
+                }
             }
         }
         else
         {
             // No tiene animación de transición, solo cambiar el loop
             isStartingMovement = false;
+            overrideMoveZ = false;
 
             if (showEntryExitDebugLogs)
             {
@@ -1948,10 +2048,17 @@ void UpdateAnimations()
     // 🔹 3. Parámetros de dirección (si los usas en tu blend tree)
     // ✅ Usar dampTime para suavizar las transiciones
     // 🎭 Si está reproduciendo Idle Variation, forzar MoveX/MoveZ a 0
+    // 🎬 Si está en Blend Tree Mode con override, usar valores override
     if (isPlayingIdleVariation)
     {
         animator.SetFloat("MoveX", 0f, directionAnimationDampTime, Time.deltaTime);
         animator.SetFloat("MoveZ", 0f, directionAnimationDampTime, Time.deltaTime);
+    }
+    else if (useBlendTreeMode && overrideMoveZ)
+    {
+        // 🎬 BLEND TREE MODE: Usar override para entry/exit animations
+        animator.SetFloat("MoveX", moveXOverride, directionAnimationDampTime, Time.deltaTime);
+        animator.SetFloat("MoveZ", moveZOverride, directionAnimationDampTime, Time.deltaTime);
     }
     else if (inputVector.magnitude > 0.1f)
     {
