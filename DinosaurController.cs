@@ -111,6 +111,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public float runDeceleration = 3f;
     [Tooltip("Velocidad mínima para considerar que dejó de correr completamente")]
     public float runStopThreshold = 0.3f;
+    [Tooltip("Suavizado de la animación Speed durante desaceleración (más alto = transición más suave)")]
+    [Range(0.1f, 1.0f)]
+    public float speedAnimationDampTime = 0.3f;
 
     [Header("🏃‍♂️ SISTEMA DE DESLIZAMIENTO (Slide)")]
     [Tooltip("Permite deslizarse al agacharse mientras corre")]
@@ -1667,7 +1670,16 @@ void UpdateAnimations()
     {
         normalizedSpeed = isInWater ? (currentSpeed / swimSpeed) : (currentSpeed / runSpeed);
     }
-    animator.SetFloat("Speed", normalizedSpeed);
+
+    // 🎯 Usar dampTime durante desaceleración para transición suave del blend tree
+    if (isDecelerating)
+    {
+        animator.SetFloat("Speed", normalizedSpeed, speedAnimationDampTime, Time.deltaTime);
+    }
+    else
+    {
+        animator.SetFloat("Speed", normalizedSpeed);
+    }
 
     // ⭐ NUEVO: Ajustar velocidad de animación según magnitud del joystick
     // Si el joystick está a 50%, la animación se reproduce al 50% de velocidad
@@ -1688,8 +1700,9 @@ void UpdateAnimations()
 
     // 🔹 2. Estados principales
     animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
-    // 🎯 Mantener IsRunning activo durante la desaceleración para animación suave
-    animator.SetBool("IsRunning", (isRunning || isDecelerating) && !isInWater);
+    // 🎯 Durante desaceleración, IsRunning = false para permitir transición suave del blend tree
+    // El blend tree usa el parámetro Speed para mezclar suavemente entre idle/walk/run
+    animator.SetBool("IsRunning", isRunning && !isInWater);
     animator.SetBool("IsCrouching", isCrouching && !isInWater);
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
