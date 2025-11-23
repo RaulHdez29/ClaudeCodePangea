@@ -1268,11 +1268,17 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         }
         else
         {
-            // Sin input
+            // Sin input - Desactivar correr automáticamente al detenerse
             targetSpeed = 0f;
             if (currentMoveDirection.magnitude > 0.1f)
             {
                 currentMoveDirection = Vector3.Lerp(currentMoveDirection, Vector3.zero, Time.deltaTime * 5f);
+            }
+
+            // 🏃 Desactivar correr cuando el jugador se detiene
+            if (isRunning)
+            {
+                isRunning = false;
             }
         }
         
