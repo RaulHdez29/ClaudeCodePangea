@@ -78,6 +78,12 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 	[Tooltip("Velocidad de correr en etapa Adulta")]
 	public float runSpeedAdult = 8f;
 
+	[Header("🦆 Stats - Velocidad de Crouch")]
+	[Tooltip("Velocidad de crouch/agachado en etapa Juvenil")]
+	public float crouchSpeedJuvenile = 1f;
+	[Tooltip("Velocidad de crouch/agachado en etapa Adulta")]
+	public float crouchSpeedAdult = 2f;
+
 	[Header("🏊 Stats - Velocidad de Nadar")]
 	[Tooltip("Velocidad de nadar en etapa Juvenil")]
 	public float swimSpeedJuvenile = 2f;
@@ -263,12 +269,14 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 		float currentMaxHealth = Mathf.Lerp(healthJuvenile, healthAdult, growthProgress);
 		float currentWalkSpeed = Mathf.Lerp(walkSpeedJuvenile, walkSpeedAdult, growthProgress);
 		float currentRunSpeed = Mathf.Lerp(runSpeedJuvenile, runSpeedAdult, growthProgress);
+		float currentCrouchSpeed = Mathf.Lerp(crouchSpeedJuvenile, crouchSpeedAdult, growthProgress);
 		float currentSwimSpeed = Mathf.Lerp(swimSpeedJuvenile, swimSpeedAdult, growthProgress);
 
 		// Aplicar al SimpleDinosaurController
 		dinosaurController.attackDamage = currentDamage;
 		dinosaurController.walkSpeed = currentWalkSpeed;
 		dinosaurController.runSpeed = currentRunSpeed;
+		dinosaurController.crouchSpeed = currentCrouchSpeed;
 		dinosaurController.swimSpeed = currentSwimSpeed;
 
 		// Aplicar al HealthSystem manteniendo el porcentaje de vida
