@@ -103,6 +103,15 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public float crouchSpeed = 1f;
     public float turnSpeed = 120f;
 
+    [Header("🎯 DESACELERACIÓN SUAVE AL DEJAR DE CORRER")]
+    [Tooltip("Habilita desaceleración gradual al soltar el botón de correr")]
+    public bool enableSmoothRunDeceleration = true;
+    [Tooltip("Velocidad de desaceleración al dejar de correr (más alto = frena más rápido)")]
+    [Range(1f, 10f)]
+    public float runDeceleration = 3f;
+    [Tooltip("Velocidad mínima para considerar que dejó de correr completamente")]
+    public float runStopThreshold = 0.3f;
+
     [Header("🏃‍♂️ SISTEMA DE DESLIZAMIENTO (Slide)")]
     [Tooltip("Permite deslizarse al agacharse mientras corre")]
     public bool enableSliding = true;
@@ -510,6 +519,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private Vector3 slideDirection = Vector3.zero;
     private float slideTimer = 0f;
 
+    // 🎯 Variables de desaceleración suave del run
+    private bool isDecelerating = false;
+    private float decelerationSpeed = 0f;
+
     // ⭐ VARIABLES DE RADIO DE GIRO NATURAL
     private Vector3 currentMoveDirection;
     private Vector3 targetMoveDirection;
@@ -678,7 +691,29 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         {
             runButton.onClick.RemoveAllListeners();
             runButton.onClick.AddListener(() => {
-                isRunning = !isRunning;
+                // 🎯 Si está activando el run
+                if (!isRunning)
+                {
+                    isRunning = true;
+                    isDecelerating = false; // Cancelar cualquier desaceleración
+                }
+                // 🎯 Si está desactivando el run
+                else
+                {
+                    // Si la desaceleración suave está habilitada y hay velocidad
+                    if (enableSmoothRunDeceleration && currentSpeed > walkSpeed)
+                    {
+                        isDecelerating = true;
+                        decelerationSpeed = currentSpeed; // Guardar velocidad actual
+                        isRunning = false; // Desactivar flag de correr
+                    }
+                    else
+                    {
+                        // Desactivar directamente si no hay velocidad o está deshabilitado
+                        isRunning = false;
+                        isDecelerating = false;
+                    }
+                }
                 // Si activa correr mientras está agachado, se mantiene agachado
                 // hasta que mueva el joystick (lógica en CalculateMovement)
             });
@@ -706,6 +741,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                     if (isRunning)
                     {
                         isRunning = false;
+                        isDecelerating = false; // 🎯 Cancelar desaceleración al agacharse
                     }
 
                     // Si está moviéndose rápido y puede hacer slide, activar deslizamiento
@@ -1026,6 +1062,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
 			currentSpeed = 0f;
 			targetSpeed = 0f;
 			isRunning = false;
+			isDecelerating = false; // 🎯 Cancelar desaceleración al llamar
 			return;
 		}
 
@@ -1253,7 +1290,26 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                 currentMoveDirection = Vector3.Lerp(currentMoveDirection, Vector3.zero, Time.deltaTime * 5f);
             }
         }
-        
+
+        // 🎯 SISTEMA DE DESACELERACIÓN SUAVE AL DEJAR DE CORRER
+        if (isDecelerating)
+        {
+            // Reducir gradualmente la velocidad de desaceleración
+            decelerationSpeed = Mathf.Lerp(decelerationSpeed, walkSpeed, Time.deltaTime * runDeceleration);
+
+            // Si está cerca de la velocidad de caminar o menor, terminar desaceleración
+            if (decelerationSpeed <= walkSpeed + runStopThreshold || inputVector.magnitude < movementThreshold)
+            {
+                isDecelerating = false;
+                decelerationSpeed = 0f;
+            }
+            else
+            {
+                // Usar velocidad de desaceleración en lugar de targetSpeed
+                targetSpeed = Mathf.Max(targetSpeed, decelerationSpeed * inputVector.magnitude);
+            }
+        }
+
         // Suavizar velocidad
         currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * movementSmoothness);
         
@@ -1631,7 +1687,8 @@ void UpdateAnimations()
 
     // 🔹 2. Estados principales
     animator.SetBool("IsGrounded", controller.isGrounded && !isInWater);
-    animator.SetBool("IsRunning", isRunning && !isInWater);
+    // 🎯 Mantener IsRunning activo durante la desaceleración para animación suave
+    animator.SetBool("IsRunning", (isRunning || isDecelerating) && !isInWater);
     animator.SetBool("IsCrouching", isCrouching && !isInWater);
     animator.SetBool("IsAttacking", isAttacking);
     animator.SetFloat("VerticalSpeed", velocity.y);
@@ -2986,6 +3043,12 @@ void UpdateTimers()
 			if (currentStamina <= 0f)
 			{
 				currentStamina = 0f;
+				// 🎯 Activar desaceleración suave al quedarse sin stamina
+				if (enableSmoothRunDeceleration && currentSpeed > walkSpeed)
+				{
+					isDecelerating = true;
+					decelerationSpeed = currentSpeed;
+				}
 				isRunning = false;
 			}
 		}
