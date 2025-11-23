@@ -691,28 +691,11 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         {
             runButton.onClick.RemoveAllListeners();
             runButton.onClick.AddListener(() => {
-                // 🎯 Si está activando el run
-                if (!isRunning)
+                isRunning = !isRunning;
+                // 🎯 Si activa correr, cancelar cualquier desaceleración
+                if (isRunning)
                 {
-                    isRunning = true;
-                    isDecelerating = false; // Cancelar cualquier desaceleración
-                }
-                // 🎯 Si está desactivando el run
-                else
-                {
-                    // Si la desaceleración suave está habilitada y hay velocidad
-                    if (enableSmoothRunDeceleration && currentSpeed > walkSpeed)
-                    {
-                        isDecelerating = true;
-                        decelerationSpeed = currentSpeed; // Guardar velocidad actual
-                        isRunning = false; // Desactivar flag de correr
-                    }
-                    else
-                    {
-                        // Desactivar directamente si no hay velocidad o está deshabilitado
-                        isRunning = false;
-                        isDecelerating = false;
-                    }
+                    isDecelerating = false;
                 }
                 // Si activa correr mientras está agachado, se mantiene agachado
                 // hasta que mueva el joystick (lógica en CalculateMovement)
@@ -1283,30 +1266,48 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
         }
         else
         {
-            // Sin input
-            targetSpeed = 0f;
+            // Sin input del joystick
+            // 🎯 Si estaba moviéndose rápido (corriendo), activar desaceleración suave
+            if (enableSmoothRunDeceleration && currentSpeed > walkSpeed && !isDecelerating)
+            {
+                isDecelerating = true;
+                decelerationSpeed = currentSpeed; // Guardar velocidad actual para desacelerar desde ahí
+            }
+
+            // Si no está en desaceleración, detener normalmente
+            if (!isDecelerating)
+            {
+                targetSpeed = 0f;
+            }
+
             if (currentMoveDirection.magnitude > 0.1f)
             {
                 currentMoveDirection = Vector3.Lerp(currentMoveDirection, Vector3.zero, Time.deltaTime * 5f);
             }
         }
 
-        // 🎯 SISTEMA DE DESACELERACIÓN SUAVE AL DEJAR DE CORRER
+        // 🎯 SISTEMA DE DESACELERACIÓN SUAVE AL SOLTAR JOYSTICK
         if (isDecelerating)
         {
-            // Reducir gradualmente la velocidad de desaceleración
-            decelerationSpeed = Mathf.Lerp(decelerationSpeed, walkSpeed, Time.deltaTime * runDeceleration);
+            // Reducir gradualmente la velocidad de desaceleración hasta 0
+            decelerationSpeed = Mathf.Lerp(decelerationSpeed, 0f, Time.deltaTime * runDeceleration);
 
-            // Si está cerca de la velocidad de caminar o menor, terminar desaceleración
-            if (decelerationSpeed <= walkSpeed + runStopThreshold || inputVector.magnitude < movementThreshold)
+            // Aplicar la velocidad de desaceleración como targetSpeed
+            targetSpeed = decelerationSpeed;
+
+            // Si llegó casi a 0, terminar desaceleración
+            if (decelerationSpeed <= runStopThreshold)
             {
                 isDecelerating = false;
                 decelerationSpeed = 0f;
+                targetSpeed = 0f;
             }
-            else
+
+            // Si vuelve a mover el joystick, cancelar desaceleración
+            if (inputVector.magnitude > movementThreshold)
             {
-                // Usar velocidad de desaceleración en lugar de targetSpeed
-                targetSpeed = Mathf.Max(targetSpeed, decelerationSpeed * inputVector.magnitude);
+                isDecelerating = false;
+                decelerationSpeed = 0f;
             }
         }
 
