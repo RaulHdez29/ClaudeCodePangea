@@ -460,6 +460,24 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     [Tooltip("Permitir salto desde el agua")]
     public bool canJumpFromWater = false;
 
+    [Header("🏊 Sistema de Estamina en Natación")]
+    [Tooltip("¿Es semi-acuático? (puede hundirse/subir con botones UI). Si NO, es totalmente acuático (solo flota)")]
+    public bool isSemiAquatic = false;
+    [Tooltip("Consumo de estamina por segundo al nadar sin moverse")]
+    public float staminaSwimIdleDrain = 1f;
+    [Tooltip("Consumo de estamina por segundo al nadar moviéndose")]
+    public float staminaSwimMovingDrain = 3f;
+    [Tooltip("Consumo de estamina por segundo al nadar corriendo")]
+    public float staminaSwimRunningDrain = 8f;
+    [Tooltip("Multiplicador de velocidad al correr nadando")]
+    public float swimRunSpeedMultiplier = 1.5f;
+    [Tooltip("Daño por segundo al estar hundido sin estamina")]
+    public float drownDamageRate = 5f;
+    [Tooltip("Velocidad de hundimiento (semi-acuáticos)")]
+    public float sinkSpeed = 2f;
+    [Tooltip("Velocidad de ascenso (semi-acuáticos)")]
+    public float riseSpeed = 3f;
+
     // Estados
     public enum MovementState
     {
@@ -492,6 +510,10 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public int enemiesInRange = 0;
     public bool isInWater = false;
     public bool isSwimming = false;
+    public bool isUnderwater = false; // Hundido bajo el agua
+    public bool isDrowning = false; // Hundiéndose sin estamina
+    public bool isDiving = false; // Control de UI para hundirse (solo semi-acuáticos)
+    public bool isRising = false; // Control de UI para subir (solo semi-acuáticos)
     public bool isDead = false;
 
     // Character Controller
@@ -1335,17 +1357,68 @@ void ApplyMovement()
         {
             // 🏊 AGUA PROFUNDA - ACTIVAR NATACIÓN
 
-            // ✅ FLOTACIÓN - aplicar fuerza hacia arriba
-            velocity.y += buoyancyForce * Time.deltaTime;
+            // Determinar si está nadando (moviéndose)
+            isSwimming = inputVector.magnitude > 0.1f;
+
+            // 🏊 SISTEMA DE ESTAMINA EN NATACIÓN
+            bool hasStaminaToSwim = currentStamina > 0f;
+
+            if (!hasStaminaToSwim)
+            {
+                // ⚠️ SIN ESTAMINA - SE HUNDE
+                isDrowning = true;
+                velocity.y -= sinkSpeed * Time.deltaTime; // Hundirse
+                velocity.y = Mathf.Clamp(velocity.y, -sinkSpeed, 0f);
+                isUnderwater = true;
+            }
+            else
+            {
+                isDrowning = false;
+
+                // 🏊 CONTROLES VERTICALES PARA SEMI-ACUÁTICOS
+                if (isSemiAquatic)
+                {
+                    // Semi-acuáticos pueden hundirse y subir con botones de UI
+
+                    if (isDiving)
+                    {
+                        // Hundirse (botón UI)
+                        velocity.y -= sinkSpeed * Time.deltaTime;
+                        isUnderwater = transform.position.y < (waterSurfaceY - waterSurfaceOffset);
+                    }
+                    else if (isRising)
+                    {
+                        // Subir (botón UI)
+                        velocity.y += riseSpeed * Time.deltaTime;
+                        isUnderwater = false;
+                    }
+                    else
+                    {
+                        // ✅ FLOTACIÓN NORMAL
+                        velocity.y += buoyancyForce * Time.deltaTime;
+                        isUnderwater = false;
+                    }
+                }
+                else
+                {
+                    // ✅ ACUÁTICOS TOTALES - FLOTACIÓN NORMAL
+                    velocity.y += buoyancyForce * Time.deltaTime;
+                    isUnderwater = false;
+                }
+            }
 
             // Limitar velocidad vertical en agua
-            velocity.y = Mathf.Clamp(velocity.y, -2f, 2f);
+            velocity.y = Mathf.Clamp(velocity.y, -sinkSpeed, riseSpeed);
 
             // Aplicar resistencia del agua (drag)
             velocity *= waterDrag;
 
-            // Determinar si está nadando (moviéndose)
-            isSwimming = inputVector.magnitude > 0.1f;
+            // 🏃 APLICAR VELOCIDAD DE NADO CON RUN
+            if (isRunning && hasStaminaToSwim)
+            {
+                // Nadar más rápido al correr
+                moveDirection *= swimRunSpeedMultiplier;
+            }
 
             // No resetear hasJumped en agua (a menos que se permita saltar desde agua)
             if (canJumpFromWater)
@@ -2001,6 +2074,33 @@ void UpdateAnimations()
         }
     }
     
+    // 🏊 Métodos para controles de hundimiento/ascenso (solo semi-acuáticos)
+    public void StartDiving()
+    {
+        if (isSemiAquatic && isInWater)
+        {
+            isDiving = true;
+        }
+    }
+
+    public void StopDiving()
+    {
+        isDiving = false;
+    }
+
+    public void StartRising()
+    {
+        if (isSemiAquatic && isInWater)
+        {
+            isRising = true;
+        }
+    }
+
+    public void StopRising()
+    {
+        isRising = false;
+    }
+
     public void TryAttack()
     {
 		if (isCalling) return;
@@ -2950,6 +3050,10 @@ void UpdateTimers()
     {
         isInWater = false;
         isSwimming = false;
+        isUnderwater = false; // ⭐ Resetear estado de hundimiento
+        isDrowning = false; // ⭐ Resetear estado de ahogamiento
+        isDiving = false; // ⭐ Resetear control de hundimiento
+        isRising = false; // ⭐ Resetear control de ascenso
         isTouchingWater = false; // ⭐ Ya no está tocando agua
         waterCollider = null;
 
@@ -2977,8 +3081,48 @@ void UpdateTimers()
 			currentThirst = Mathf.Clamp(currentThirst, 0f, maxThirst);
 		}
 
-		// ⚡ Estamina - Consumo al correr (basado en velocidad real, no en el botón)
-		if (isRunning && currentSpeed > movementThreshold && !isEating && !isDrinking)
+		// 🏊 SISTEMA DE ESTAMINA EN NATACIÓN
+		if (isInWater && !isEating && !isDrinking)
+		{
+			// Verificar si está nadando profundamente (no en agua poco profunda)
+			float waterDepth = waterSurfaceY - transform.position.y;
+			bool isDeepEnoughToSwim = waterDepth >= waterSurfaceOffset;
+
+			if (isDeepEnoughToSwim)
+			{
+				bool isMoving = currentSpeed > movementThreshold;
+
+				if (!isMoving)
+				{
+					// 🏊 SIN MOVERSE - Solo acuáticos totales gastan estamina al flotar
+					if (!isSemiAquatic)
+					{
+						// Acuáticos totales gastan estamina incluso sin moverse
+						currentStamina -= staminaSwimIdleDrain * Time.deltaTime;
+					}
+					// Semi-acuáticos NO gastan estamina cuando están quietos
+				}
+				else if (isRunning)
+				{
+					// 🏃 NADANDO CORRIENDO - Gasta más estamina
+					currentStamina -= staminaSwimRunningDrain * Time.deltaTime;
+				}
+				else
+				{
+					// 🏊 NADANDO MOVIÉNDOSE - Gasta estamina normal
+					currentStamina -= staminaSwimMovingDrain * Time.deltaTime;
+				}
+
+				// Si se queda sin estamina, dejar de correr automáticamente
+				if (currentStamina <= 0f)
+				{
+					currentStamina = 0f;
+					isRunning = false;
+				}
+			}
+		}
+		// ⚡ Estamina - Consumo al correr EN TIERRA (basado en velocidad real, no en el botón)
+		else if (isRunning && currentSpeed > movementThreshold && !isEating && !isDrinking && !isSwimming)
 		{
 			currentStamina -= staminaDrainRate * Time.deltaTime;
 
@@ -2989,9 +3133,9 @@ void UpdateTimers()
 				isRunning = false;
 			}
 		}
-		// ⚡ Estamina - Regeneración (cuando NO está corriendo activamente)
+		// ⚡ Estamina - Regeneración (cuando NO está corriendo activamente ni nadando)
 		// ✅ NUEVO: Regenera al caminar Y cuando está quieto (solo NO regenera al correr)
-		else if (!isEating && !isDrinking)
+		else if (!isEating && !isDrinking && !isSwimming)
 		{
 			// Verificar si está durmiendo para regenerar más rápido (usando referencia cacheada)
 			// NOTA: Cuando está durmiendo, el DinosaurSleepSystem también maneja la regeneración
@@ -3003,6 +3147,16 @@ void UpdateTimers()
 
 		// Limitar estamina
 		currentStamina = Mathf.Clamp(currentStamina, 0f, maxStamina);
+
+		// 💀 DAÑO POR AHOGAMIENTO - Cuando está hundido sin estamina
+		if (isDrowning && isUnderwater)
+		{
+			HealthSystem healthSystem = GetComponent<HealthSystem>();
+			if (healthSystem != null && !healthSystem.isDead)
+			{
+				healthSystem.TakeDamage(drownDamageRate * Time.deltaTime);
+			}
+		}
 	}
 
 	/// <summary>
