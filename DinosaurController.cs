@@ -461,7 +461,7 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public bool canJumpFromWater = false;
 
     [Header("🏊 Sistema de Estamina en Natación")]
-    [Tooltip("¿Es semi-acuático? (puede hundirse y subir). Si NO es semi-acuático, es totalmente acuático")]
+    [Tooltip("¿Es semi-acuático? (puede hundirse/subir con botones UI). Si NO, es totalmente acuático (solo flota)")]
     public bool isSemiAquatic = false;
     [Tooltip("Consumo de estamina por segundo al nadar sin moverse")]
     public float staminaSwimIdleDrain = 1f;
@@ -471,8 +471,6 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public float staminaSwimRunningDrain = 8f;
     [Tooltip("Multiplicador de velocidad al correr nadando")]
     public float swimRunSpeedMultiplier = 1.5f;
-    [Tooltip("Regeneración de estamina por segundo al nadar sin moverse (solo acuáticos NO semi-acuáticos)")]
-    public float staminaSwimRegen = 3f;
     [Tooltip("Daño por segundo al estar hundido sin estamina")]
     public float drownDamageRate = 5f;
     [Tooltip("Velocidad de hundimiento (semi-acuáticos)")]
@@ -3096,17 +3094,8 @@ void UpdateTimers()
 
 				if (!isMoving)
 				{
-					// 🏊 SIN MOVERSE - Acuáticos regeneran, semi-acuáticos gastan
-					if (!isSemiAquatic)
-					{
-						// Acuáticos totales REGENERAN estamina al estar quietos nadando
-						currentStamina += staminaSwimRegen * Time.deltaTime;
-					}
-					else
-					{
-						// Semi-acuáticos GASTAN estamina al flotar
-						currentStamina -= staminaSwimIdleDrain * Time.deltaTime;
-					}
+					// 🏊 SIN MOVERSE - TODOS gastan estamina lentamente al flotar
+					currentStamina -= staminaSwimIdleDrain * Time.deltaTime;
 				}
 				else if (isRunning)
 				{
