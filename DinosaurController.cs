@@ -514,6 +514,8 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     public bool isSwimming = false;
     public bool isUnderwater = false; // Hundido bajo el agua
     public bool isDrowning = false; // Hundiéndose sin estamina
+    public bool isDiving = false; // Control de UI para hundirse (solo semi-acuáticos)
+    public bool isRising = false; // Control de UI para subir (solo semi-acuáticos)
     public bool isDead = false;
 
     // Character Controller
@@ -1378,17 +1380,17 @@ void ApplyMovement()
                 // 🏊 CONTROLES VERTICALES PARA SEMI-ACUÁTICOS
                 if (isSemiAquatic)
                 {
-                    // Semi-acuáticos pueden hundirse y subir con controles
-                    bool divingDown = Input.GetKey(KeyCode.C); // Bajar (tecla C)
-                    bool divingUp = Input.GetKey(KeyCode.Space); // Subir (tecla Espacio)
+                    // Semi-acuáticos pueden hundirse y subir con botones de UI
 
-                    if (divingDown)
+                    if (isDiving)
                     {
+                        // Hundirse (botón UI)
                         velocity.y -= sinkSpeed * Time.deltaTime;
                         isUnderwater = transform.position.y < (waterSurfaceY - waterSurfaceOffset);
                     }
-                    else if (divingUp)
+                    else if (isRising)
                     {
+                        // Subir (botón UI)
                         velocity.y += riseSpeed * Time.deltaTime;
                         isUnderwater = false;
                     }
@@ -2074,6 +2076,33 @@ void UpdateAnimations()
         }
     }
     
+    // 🏊 Métodos para controles de hundimiento/ascenso (solo semi-acuáticos)
+    public void StartDiving()
+    {
+        if (isSemiAquatic && isInWater)
+        {
+            isDiving = true;
+        }
+    }
+
+    public void StopDiving()
+    {
+        isDiving = false;
+    }
+
+    public void StartRising()
+    {
+        if (isSemiAquatic && isInWater)
+        {
+            isRising = true;
+        }
+    }
+
+    public void StopRising()
+    {
+        isRising = false;
+    }
+
     public void TryAttack()
     {
 		if (isCalling) return;
@@ -3025,6 +3054,8 @@ void UpdateTimers()
         isSwimming = false;
         isUnderwater = false; // ⭐ Resetear estado de hundimiento
         isDrowning = false; // ⭐ Resetear estado de ahogamiento
+        isDiving = false; // ⭐ Resetear control de hundimiento
+        isRising = false; // ⭐ Resetear control de ascenso
         isTouchingWater = false; // ⭐ Ya no está tocando agua
         waterCollider = null;
 
