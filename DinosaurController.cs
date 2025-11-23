@@ -3931,19 +3931,30 @@ void UpdateTimers()
 		Animator cloneAnimator = deadBodyClone.GetComponent<Animator>();
 		if (cloneAnimator != null)
 		{
-			// ✅ NUEVO CLIENTE: Reproducir animación de muerte para que vean el último frame
-			if (isNewClient && originalController != null && originalController.deathAnimatorController != null)
+			if (isNewClient)
 			{
-				// Asignar el controller de muerte que solo tiene la animación de muerte
-				cloneAnimator.runtimeAnimatorController = originalController.deathAnimatorController;
+				// ✅ NUEVO CLIENTE: Intentar reproducir animación de muerte
+				if (originalController != null && originalController.deathAnimatorController != null)
+				{
+					// Asignar el controller de muerte que solo tiene la animación de muerte
+					cloneAnimator.runtimeAnimatorController = originalController.deathAnimatorController;
 
-				// Iniciar corrutina para reproducir la animación y fijar el último frame
-				StartCoroutine(PlayDeathAnimationAndFreeze(cloneAnimator));
-				Debug.Log("🎭 Animator de muerte asignado para NUEVO CLIENTE - se reproducirá animación");
+					// Iniciar corrutina para reproducir la animación y fijar el último frame
+					StartCoroutine(PlayDeathAnimationAndFreeze(cloneAnimator));
+					Debug.Log("🎭 Animator de muerte asignado para NUEVO CLIENTE - se reproducirá animación");
+				}
+				else
+				{
+					// ⚠️ FALLBACK: Si no hay deathAnimatorController configurado, destruir el animator
+					// Esto previene que el cuerpo se quede "parado" sin animación
+					Debug.LogWarning($"⚠️ deathAnimatorController no configurado para {modelName}. Destruyendo animator inmediatamente.");
+					Destroy(cloneAnimator);
+					Debug.Log("🎭 Animator destruido (fallback - sin deathAnimatorController configurado)");
+				}
 			}
-			// ❌ CLIENTE PRESENTE DURANTE LA MUERTE: Destruir Animator inmediatamente
 			else
 			{
+				// ❌ CLIENTE PRESENTE DURANTE LA MUERTE: Destruir Animator inmediatamente
 				// Destruir el Animator mantiene la pose actual de los huesos
 				Destroy(cloneAnimator);
 				Debug.Log("🎭 Animator destruido inmediatamente (cliente presente durante la muerte)");
