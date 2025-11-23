@@ -101,20 +101,27 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 	// ═══════════════════════════════════════════════════════════
 
 	[Header("🔊 Sonidos de Pisadas por Etapa")]
-	[Tooltip("Sonidos de pisadas para etapa Juvenil")]
-	public AudioClip[] footstepSoundsJuvenile;
-	[Tooltip("Sonidos de pisadas para etapa Sub-adulta")]
-	public AudioClip[] footstepSoundsSubAdult;
-	[Tooltip("Sonidos de pisadas para etapa Adulta")]
-	public AudioClip[] footstepSoundsAdult;
+	[Tooltip("Sonidos de caminar para etapa Juvenil")]
+	public AudioClip[] walkSoundsJuvenile;
+	[Tooltip("Sonidos de caminar para etapa Sub-adulta")]
+	public AudioClip[] walkSoundsSubAdult;
+	[Tooltip("Sonidos de caminar para etapa Adulta")]
+	public AudioClip[] walkSoundsAdult;
+
+	[Tooltip("Sonidos de correr para etapa Juvenil")]
+	public AudioClip[] runSoundsJuvenile;
+	[Tooltip("Sonidos de correr para etapa Sub-adulta")]
+	public AudioClip[] runSoundsSubAdult;
+	[Tooltip("Sonidos de correr para etapa Adulta")]
+	public AudioClip[] runSoundsAdult;
 
 	// ═══════════════════════════════════════════════════════════
 	// 🔗 REFERENCIAS
 	// ═══════════════════════════════════════════════════════════
 
 	[Header("🔗 Referencias")]
-	[Tooltip("Referencia al DinosaurController")]
-	public DinosaurController dinosaurController;
+	[Tooltip("Referencia al SimpleDinosaurController")]
+	public SimpleDinosaurController dinosaurController;
 
 	[Tooltip("Referencia al HealthSystem")]
 	public HealthSystem healthSystem;
@@ -131,7 +138,7 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 		photonView = GetComponent<PhotonView>();
 
 		if (dinosaurController == null)
-			dinosaurController = GetComponent<DinosaurController>();
+			dinosaurController = GetComponent<SimpleDinosaurController>();
 
 		if (healthSystem == null)
 			healthSystem = GetComponent<HealthSystem>();
@@ -248,7 +255,7 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 		float currentRunSpeed = Mathf.Lerp(runSpeedJuvenile, runSpeedAdult, growthProgress);
 		float currentSwimSpeed = Mathf.Lerp(swimSpeedJuvenile, swimSpeedAdult, growthProgress);
 
-		// Aplicar al DinosaurController
+		// Aplicar al SimpleDinosaurController
 		dinosaurController.attackDamage = currentDamage;
 		dinosaurController.walkSpeed = currentWalkSpeed;
 		dinosaurController.runSpeed = currentRunSpeed;
@@ -297,26 +304,36 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 	{
 		if (dinosaurController == null) return;
 
-		AudioClip[] newFootsteps = null;
+		AudioClip[] newWalkSounds = null;
+		AudioClip[] newRunSounds = null;
 
 		switch (currentStage)
 		{
 			case GrowthStage.Juvenile:
-				newFootsteps = footstepSoundsJuvenile;
+				newWalkSounds = walkSoundsJuvenile;
+				newRunSounds = runSoundsJuvenile;
 				break;
 			case GrowthStage.SubAdult:
-				newFootsteps = footstepSoundsSubAdult;
+				newWalkSounds = walkSoundsSubAdult;
+				newRunSounds = runSoundsSubAdult;
 				break;
 			case GrowthStage.Adult:
-				newFootsteps = footstepSoundsAdult;
+				newWalkSounds = walkSoundsAdult;
+				newRunSounds = runSoundsAdult;
 				break;
 		}
 
-		// Actualizar sonidos en el DinosaurController
-		if (newFootsteps != null && newFootsteps.Length > 0)
+		// Actualizar sonidos en el SimpleDinosaurController
+		if (newWalkSounds != null && newWalkSounds.Length > 0)
 		{
-			dinosaurController.footstepSounds = newFootsteps;
-			Debug.Log($"🔊 Sonidos de pisadas actualizados para etapa: {currentStage}");
+			dinosaurController.walkSounds = newWalkSounds;
+			Debug.Log($"🔊 Sonidos de caminar actualizados para etapa: {currentStage}");
+		}
+
+		if (newRunSounds != null && newRunSounds.Length > 0)
+		{
+			dinosaurController.runSounds = newRunSounds;
+			Debug.Log($"🔊 Sonidos de correr actualizados para etapa: {currentStage}");
 		}
 	}
 
