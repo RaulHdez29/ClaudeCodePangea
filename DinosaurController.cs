@@ -3094,8 +3094,13 @@ void UpdateTimers()
 
 				if (!isMoving)
 				{
-					// 🏊 SIN MOVERSE - TODOS gastan estamina lentamente al flotar
-					currentStamina -= staminaSwimIdleDrain * Time.deltaTime;
+					// 🏊 SIN MOVERSE - Solo acuáticos totales gastan estamina al flotar
+					if (!isSemiAquatic)
+					{
+						// Acuáticos totales gastan estamina incluso sin moverse
+						currentStamina -= staminaSwimIdleDrain * Time.deltaTime;
+					}
+					// Semi-acuáticos NO gastan estamina cuando están quietos
 				}
 				else if (isRunning)
 				{
