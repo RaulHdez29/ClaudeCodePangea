@@ -88,13 +88,23 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 	// 📏 ESCALA VISUAL
 	// ═══════════════════════════════════════════════════════════
 
-	[Header("📏 Escala Visual")]
-	[Tooltip("Escala del modelo en etapa Juvenil")]
-	public float scaleJuvenile = 0.5f;
-	[Tooltip("Escala del modelo en etapa Sub-adulta")]
-	public float scaleSubAdult = 0.75f;
-	[Tooltip("Escala del modelo en etapa Adulta")]
-	public float scaleAdult = 1f;
+	[Header("📏 Escala Visual (Crecimiento Gradual)")]
+	[Tooltip("Escala del modelo en etapa Juvenil (x, y, z)")]
+	public Vector3 scaleJuvenile = new Vector3(0.5f, 0.5f, 0.5f);
+	[Tooltip("Escala del modelo en etapa Adulta (x, y, z)")]
+	public Vector3 scaleAdult = new Vector3(1f, 1f, 1f);
+
+	// ═══════════════════════════════════════════════════════════
+	// 📷 DISTANCIA DE CÁMARA
+	// ═══════════════════════════════════════════════════════════
+
+	[Header("📷 Distancia de Cámara (Crecimiento Gradual)")]
+	[Tooltip("Distancia de cámara en etapa Juvenil")]
+	public float cameraDistanceJuvenile = 3f;
+	[Tooltip("Distancia de cámara en etapa Adulta")]
+	public float cameraDistanceAdult = 6f;
+	[Tooltip("Referencia al script de cámara (TouchThirdPersonCamera)")]
+	public MonoBehaviour cameraScript;
 
 	// ═══════════════════════════════════════════════════════════
 	// 🔊 SONIDOS POR ETAPA
@@ -267,33 +277,47 @@ public class DinosaurGrowthSystem : MonoBehaviourPunCallbacks, IPunObservable
 			healthSystem.maxHealth = currentMaxHealth;
 			healthSystem.currentHealth = currentMaxHealth * healthPercentage; // Mantener porcentaje
 		}
+
+		// Actualizar escala visual y distancia de cámara gradualmente
+		UpdateVisualScale();
 	}
 
 	// ═══════════════════════════════════════════════════════════
-	// 📏 ESCALA VISUAL
+	// 📏 ESCALA VISUAL Y DISTANCIA DE CÁMARA
 	// ═══════════════════════════════════════════════════════════
 
 	void UpdateVisualScale()
 	{
-		float targetScale = scaleJuvenile;
+		// Interpolar escala gradualmente entre juvenil y adulto
+		Vector3 currentScale = Vector3.Lerp(scaleJuvenile, scaleAdult, growthProgress);
+		transform.localScale = currentScale;
 
-		switch (currentStage)
+		// Interpolar distancia de cámara gradualmente
+		float currentCameraDistance = Mathf.Lerp(cameraDistanceJuvenile, cameraDistanceAdult, growthProgress);
+		UpdateCameraDistance(currentCameraDistance);
+	}
+
+	void UpdateCameraDistance(float distance)
+	{
+		// Solo actualizar la cámara para el jugador local
+		if (cameraScript == null || photonView == null || !photonView.IsMine) return;
+
+		// Intentar acceder a la propiedad distanceFromTarget
+		// Usa reflexión para ser compatible con diferentes nombres de variables
+		var distanceField = cameraScript.GetType().GetField("distanceFromTarget");
+		if (distanceField != null)
 		{
-			case GrowthStage.Juvenile:
-				targetScale = scaleJuvenile;
-				break;
-			case GrowthStage.SubAdult:
-				targetScale = scaleSubAdult;
-				break;
-			case GrowthStage.Adult:
-				targetScale = scaleAdult;
-				break;
+			distanceField.SetValue(cameraScript, distance);
 		}
-
-		// Aplicar escala al transform
-		transform.localScale = Vector3.one * targetScale;
-
-		Debug.Log($"📏 Escala actualizada a: {targetScale}");
+		else
+		{
+			// Intentar con propiedad en lugar de campo
+			var distanceProperty = cameraScript.GetType().GetProperty("distanceFromTarget");
+			if (distanceProperty != null && distanceProperty.CanWrite)
+			{
+				distanceProperty.SetValue(cameraScript, distance);
+			}
+		}
 	}
 
 	// ═══════════════════════════════════════════════════════════
