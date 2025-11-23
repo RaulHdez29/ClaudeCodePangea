@@ -63,6 +63,8 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 	[Header("💀 UI de Muerte")]
 	[Tooltip("Panel que se muestra cuando el dinosaurio muere")]
 	public GameObject deathPanel;
+	[Tooltip("Tiempo de espera antes de mostrar el panel de muerte (segundos)")]
+	public float deathPanelDelay = 3f;
 
 	[Header("🩸 Sistema de Daño Visual en Shader")]
 	[Tooltip("Activar sistema de daño visual en el shader")]
@@ -313,10 +315,10 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 			dinosaurController.Die(); // Esto llama a RPC_Die internamente
 		}
 
-		// 💀 Activar panel de muerte (SOLO JUGADOR LOCAL)
+		// 💀 Activar panel de muerte con delay (SOLO JUGADOR LOCAL)
 		if (photonView != null && photonView.IsMine && deathPanel != null)
 		{
-			deathPanel.SetActive(true);
+			StartCoroutine(ShowDeathPanelAfterDelay());
 		}
 
         // 🌐 Sincronizar efectos visuales de muerte en todos los clientes
@@ -690,6 +692,24 @@ public class HealthSystem : MonoBehaviourPunCallbacks
 			string playerType = (photonView != null && photonView.IsMine) ? "LOCAL" : "REMOTO";
 			float healthPercentage = (currentHealth / maxHealth) * 100f;
 			//Debug.Log($"🩸 Daño visual actualizado ({playerType}): {damageValue:F2} (Vida: {healthPercentage:F1}%)");
+		}
+	}
+
+	/// <summary>
+	/// Corrutina que muestra el panel de muerte después de un delay configurable
+	/// </summary>
+	System.Collections.IEnumerator ShowDeathPanelAfterDelay()
+	{
+		Debug.Log($"⏱️ Esperando {deathPanelDelay} segundos antes de mostrar el panel de muerte...");
+
+		// Esperar el tiempo configurado
+		yield return new WaitForSeconds(deathPanelDelay);
+
+		// Activar el panel de muerte
+		if (deathPanel != null)
+		{
+			deathPanel.SetActive(true);
+			Debug.Log("💀 Panel de muerte activado");
 		}
 	}
 
