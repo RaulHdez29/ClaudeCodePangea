@@ -532,6 +532,9 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
     private Vector3 slideDirection = Vector3.zero;
     private float slideTimer = 0f;
 
+    // 🏃 Variable para trackear si el jugador se movió después de activar correr
+    private bool wasMovingWhileRunning = false;
+
     // ⭐ VARIABLES DE RADIO DE GIRO NATURAL
     private Vector3 currentMoveDirection;
     private Vector3 targetMoveDirection;
@@ -701,6 +704,11 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
             runButton.onClick.RemoveAllListeners();
             runButton.onClick.AddListener(() => {
                 isRunning = !isRunning;
+                // Resetear el tracking de movimiento cuando se presiona el botón
+                if (isRunning)
+                {
+                    wasMovingWhileRunning = false;
+                }
                 // Si activa correr mientras está agachado, se mantiene agachado
                 // hasta que mueva el joystick (lógica en CalculateMovement)
             });
@@ -1265,6 +1273,12 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                     targetSpeed *= slopeSpeedMultiplier;
                 }
             }
+
+            // 🏃 Marcar que el jugador se movió mientras corría
+            if (isRunning)
+            {
+                wasMovingWhileRunning = true;
+            }
         }
         else
         {
@@ -1275,10 +1289,12 @@ public class SimpleDinosaurController : MonoBehaviourPunCallbacks, IPunObservabl
                 currentMoveDirection = Vector3.Lerp(currentMoveDirection, Vector3.zero, Time.deltaTime * 5f);
             }
 
-            // 🏃 Desactivar correr cuando el jugador se detiene
-            if (isRunning)
+            // 🏃 Desactivar correr cuando el jugador se detiene COMPLETAMENTE
+            // Solo desactivar si se movió después de activar correr Y ahora está realmente detenido
+            if (isRunning && wasMovingWhileRunning && currentMoveDirection.magnitude < 0.05f)
             {
                 isRunning = false;
+                wasMovingWhileRunning = false; // Resetear para el próximo ciclo
             }
         }
         
