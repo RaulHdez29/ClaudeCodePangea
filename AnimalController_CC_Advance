@@ -131,9 +131,14 @@ public class AnimalController_CC_Advance : MonoBehaviour
         // Sin movimiento
         if (stickInput.magnitude <= turnRadius)
         {
+            // Si estaba corriendo, resetear el botón cuando se detenga
+            if (isRunning)
+            {
+                isRunPressed = false;
+            }
+
             isWalking = false;
             isRunning = false;
-            // Mantener isRunPressed activo para que el usuario pueda activar correr antes de moverse
 
             ApplyGravity();
             controller.Move(verticalVelocity * Time.deltaTime);
