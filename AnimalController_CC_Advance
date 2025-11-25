@@ -6,8 +6,10 @@ public class AnimalController_CC_Advance : MonoBehaviour
     [Header("Movement")]
     public float walkSpeed = 3f;
     public float runSpeed = 6f;
-    public float rotationSpeed = 8f;
+    public float walkRotationSpeed = 5f;  // Radio más amplio (giro más lento) al caminar
+    public float runRotationSpeed = 10f;  // Radio más cerrado (giro más rápido) al correr
     public float turnRadius = 0.05f;
+    public float stopTimeBeforeReset = 0.3f; // Tiempo en segundos antes de resetear el botón de correr
 
     [Header("Camera Reference")]
     public Transform cameraTransform;
@@ -43,6 +45,7 @@ public class AnimalController_CC_Advance : MonoBehaviour
     private CharacterController controller;
     private bool isWalking;
     private Quaternion targetRotation;
+    private float stoppedTime = 0f; // Contador de tiempo parado
 
     void Start()
     {
@@ -131,8 +134,11 @@ public class AnimalController_CC_Advance : MonoBehaviour
         // Sin movimiento
         if (stickInput.magnitude <= turnRadius)
         {
-            // Si estaba corriendo, resetear el botón cuando se detenga
-            if (isRunning)
+            // Incrementar el contador de tiempo parado
+            stoppedTime += Time.deltaTime;
+
+            // Solo resetear el botón después de estar parado por stopTimeBeforeReset segundos
+            if (isRunning && stoppedTime >= stopTimeBeforeReset)
             {
                 isRunPressed = false;
             }
@@ -144,6 +150,9 @@ public class AnimalController_CC_Advance : MonoBehaviour
             controller.Move(verticalVelocity * Time.deltaTime);
             return;
         }
+
+        // Si hay movimiento, resetear el contador de tiempo parado
+        stoppedTime = 0f;
 
         // Movimiento relativo a cámara
         Vector3 camForward = cameraTransform.forward;
@@ -162,6 +171,7 @@ public class AnimalController_CC_Advance : MonoBehaviour
         isRunning = isRunPressed && joyInput.magnitude > 0.1f;
 
         float speed = isRunning ? runSpeed : walkSpeed;
+        float currentRotationSpeed = isRunning ? runRotationSpeed : walkRotationSpeed;
 
         ApplyGravity();
 
@@ -170,10 +180,11 @@ public class AnimalController_CC_Advance : MonoBehaviour
         targetRotation = Quaternion.Euler(0, targetY, 0);
 
         // Rotar gradualmente hacia la dirección objetivo
+        // Usa velocidad de rotación diferente según si camina o corre
         transform.rotation = Quaternion.Slerp(
             transform.rotation,
             targetRotation,
-            rotationSpeed * Time.deltaTime
+            currentRotationSpeed * Time.deltaTime
         );
 
         // Movimiento: el modelo avanza en la dirección que está mirando
