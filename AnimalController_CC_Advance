@@ -133,7 +133,7 @@ public class AnimalController_CC_Advance : MonoBehaviour
         {
             isWalking = false;
             isRunning = false;
-            isRunPressed = false;
+            // Mantener isRunPressed activo para que el usuario pueda activar correr antes de moverse
 
             ApplyGravity();
             controller.Move(verticalVelocity * Time.deltaTime);
