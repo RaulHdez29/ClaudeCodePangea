@@ -1,0 +1,219 @@
+using UnityEngine;
+using UnityEngine.UI;
+
+public class AnimalController_CC_Advance : MonoBehaviour
+{
+    [Header("Movement")]
+    public float walkSpeed = 3f;
+    public float runSpeed = 6f;
+    public float rotationSpeed = 8f;
+    public float turnRadius = 0.05f;
+
+    [Header("Camera Reference")]
+    public Transform cameraTransform;
+
+    [Header("Gravity + Jump")]
+    public float gravity = -20f;
+    public float jumpForce = 7f;
+    private Vector3 verticalVelocity;
+    public bool isJumping = false;
+
+    [Header("Body Lean (Natural tilt)")]
+    public float leanAmount = 12f;
+    public float leanSpeed = 6f;
+    private float currentLean = 0f;
+
+    [Header("Joystick / Animations")]
+    public FixedJoystick joystick;
+    public Animator animator;
+
+    [Header("Run Button")]
+    public Button runButton;
+    public bool isRunPressed = false;
+    private bool isRunning = false;
+
+    [Header("Jump Button")]
+    public Button jumpButton;
+
+    [Header("Attack Button")]
+    public Button attackButton;
+    public bool canAttack = true;
+    public float attackCooldown = 0.6f;
+
+    [Header("Turn Settings")]
+    public float turnMovementFactor = 0.5f; // Qué tanto avanza mientras gira
+
+    private CharacterController controller;
+    private bool isWalking;
+    private Quaternion targetRotation;
+
+    void Start()
+    {
+        controller = GetComponent<CharacterController>();
+        targetRotation = transform.rotation;
+
+        if (runButton != null)
+            runButton.onClick.AddListener(ToggleRunButton);
+
+        if (jumpButton != null)
+            jumpButton.onClick.AddListener(DoJump);
+
+        if (attackButton != null)
+            attackButton.onClick.AddListener(DoAttack);
+    }
+
+    void Update()
+    {
+        HandleMovement();
+        HandleAnimations();
+        HandleBodyLean();
+    }
+
+    void ToggleRunButton()
+    {
+        isRunPressed = !isRunPressed;
+    }
+
+    // SALTO
+    void DoJump()
+    {
+        if (controller.isGrounded && !isJumping)
+        {
+            animator.SetTrigger("Jump");
+            isJumping = true;
+            verticalVelocity.y = jumpForce;
+        }
+    }
+
+    // ATAQUE
+    void DoAttack()
+    {
+        if (!controller.isGrounded) return;
+        if (isJumping) return;
+        if (!canAttack) return;
+
+        canAttack = false;
+
+        animator.SetTrigger("Attack");
+
+        Invoke(nameof(ResetAttack), attackCooldown);
+    }
+
+    void ResetAttack()
+    {
+        canAttack = true;
+    }
+
+    // INCLINACIÓN NATURAL
+    void HandleBodyLean()
+    {
+        float h = joystick.Horizontal;
+        float targetLean = -h * leanAmount;
+
+        currentLean = Mathf.Lerp(currentLean, targetLean, leanSpeed * Time.deltaTime);
+
+        transform.localRotation = Quaternion.Euler(
+            transform.localEulerAngles.x,
+            transform.localEulerAngles.y,
+            currentLean
+        );
+    }
+
+    // MOVIMIENTO CON GIRO NATURAL
+    void HandleMovement()
+    {
+        float h = joystick.Horizontal;
+        float v = joystick.Vertical;
+
+        Vector2 joyInput = new Vector2(h, v);
+        if (joyInput.magnitude < turnRadius)
+            joyInput = Vector2.zero;
+
+        Vector3 stickInput = new Vector3(joyInput.x, 0, joyInput.y);
+
+        // Sin movimiento
+        if (stickInput.magnitude <= turnRadius)
+        {
+            isWalking = false;
+            isRunning = false;
+            isRunPressed = false;
+
+            ApplyGravity();
+            controller.Move(verticalVelocity * Time.deltaTime);
+            return;
+        }
+
+        // Movimiento relativo a cámara
+        Vector3 camForward = cameraTransform.forward;
+        camForward.y = 0;
+        camForward.Normalize();
+
+        Vector3 camRight = cameraTransform.right;
+        camRight.y = 0;
+        camRight.Normalize();
+
+        // Dirección de movimiento deseada
+        Vector3 moveDir = camForward * joyInput.y + camRight * joyInput.x;
+        moveDir.Normalize();
+
+        isWalking = true;
+        isRunning = isRunPressed && joyInput.magnitude > 0.1f;
+
+        float speed = isRunning ? runSpeed : walkSpeed;
+
+        ApplyGravity();
+
+        // Calcular rotación objetivo
+        float targetY = Mathf.Atan2(moveDir.x, moveDir.z) * Mathf.Rad2Deg;
+        targetRotation = Quaternion.Euler(0, targetY, 0);
+
+        // Diferencia angular
+        float angleDiff = Quaternion.Angle(transform.rotation, targetRotation);
+
+        // Rotar gradualmente hacia la dirección objetivo
+        transform.rotation = Quaternion.Slerp(
+            transform.rotation,
+            targetRotation,
+            rotationSpeed * Time.deltaTime
+        );
+
+        // Movimiento: combina dirección actual del modelo con la dirección deseada
+        // Esto hace que el león se mueva en un arco mientras gira
+        Vector3 currentForward = transform.forward;
+        
+        // Mientras más grande sea el ángulo, más se mueve en arco
+        float turnBlend = Mathf.Clamp01(angleDiff / 90f);
+        Vector3 blendedDirection = Vector3.Lerp(currentForward, moveDir, 1f - (turnBlend * turnMovementFactor));
+        blendedDirection.Normalize();
+
+        // Aplicar movimiento
+        Vector3 finalMove = (blendedDirection * speed) + verticalVelocity;
+        controller.Move(finalMove * Time.deltaTime);
+    }
+
+    void ApplyGravity()
+    {
+        if (controller.isGrounded)
+        {
+            if (verticalVelocity.y < 0)
+                verticalVelocity.y = -2f;
+
+            if (!isJumping)
+                verticalVelocity.y = -2f;
+        }
+        else
+        {
+            verticalVelocity.y += gravity * Time.deltaTime;
+        }
+
+        if (controller.isGrounded && verticalVelocity.y <= -2f)
+            isJumping = false;
+    }
+
+    void HandleAnimations()
+    {
+        animator.SetBool("isWalking", isWalking);
+        animator.SetBool("isRunning", isRunning);
+        animator.SetBool("isJumping", isJumping);
+    }
+}
