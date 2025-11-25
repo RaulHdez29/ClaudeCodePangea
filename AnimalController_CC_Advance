@@ -40,9 +40,6 @@ public class AnimalController_CC_Advance : MonoBehaviour
     public bool canAttack = true;
     public float attackCooldown = 0.6f;
 
-    [Header("Turn Settings")]
-    public float turnMovementFactor = 0.5f; // Qué tanto avanza mientras gira
-
     private CharacterController controller;
     private bool isWalking;
     private Quaternion targetRotation;
@@ -167,9 +164,6 @@ public class AnimalController_CC_Advance : MonoBehaviour
         float targetY = Mathf.Atan2(moveDir.x, moveDir.z) * Mathf.Rad2Deg;
         targetRotation = Quaternion.Euler(0, targetY, 0);
 
-        // Diferencia angular
-        float angleDiff = Quaternion.Angle(transform.rotation, targetRotation);
-
         // Rotar gradualmente hacia la dirección objetivo
         transform.rotation = Quaternion.Slerp(
             transform.rotation,
@@ -177,17 +171,12 @@ public class AnimalController_CC_Advance : MonoBehaviour
             rotationSpeed * Time.deltaTime
         );
 
-        // Movimiento: combina dirección actual del modelo con la dirección deseada
-        // Esto hace que el león se mueva en un arco mientras gira
-        Vector3 currentForward = transform.forward;
-        
-        // Mientras más grande sea el ángulo, más se mueve en arco
-        float turnBlend = Mathf.Clamp01(angleDiff / 90f);
-        Vector3 blendedDirection = Vector3.Lerp(currentForward, moveDir, 1f - (turnBlend * turnMovementFactor));
-        blendedDirection.Normalize();
+        // Movimiento: el modelo avanza en la dirección que está mirando
+        // Esto hace que gire sobre su propio radio sin deslizarse
+        Vector3 moveDirection = transform.forward;
 
         // Aplicar movimiento
-        Vector3 finalMove = (blendedDirection * speed) + verticalVelocity;
+        Vector3 finalMove = (moveDirection * speed) + verticalVelocity;
         controller.Move(finalMove * Time.deltaTime);
     }
 
