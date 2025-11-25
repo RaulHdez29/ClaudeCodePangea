@@ -138,7 +138,7 @@ public class AnimalController_CC_Advance : MonoBehaviour
             stoppedTime += Time.deltaTime;
 
             // Solo resetear el botón después de estar parado por stopTimeBeforeReset segundos
-            if (isRunning && stoppedTime >= stopTimeBeforeReset)
+            if (isRunPressed && stoppedTime >= stopTimeBeforeReset)
             {
                 isRunPressed = false;
             }
